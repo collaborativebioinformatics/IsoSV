@@ -33,7 +33,13 @@ Once the cache is built, run the main annotation script.
 ```bash
 # Usage:
 python scripts/annotate_svs.py \
-    --input <path_to_sv_candidates.csv> \
+    --input <path_to_sv_candidates.tsv> \
+    --tree resources/tx_tree_cache.pkl \
+    --output results/annotated_regions.csv
+
+# Example with mock data from Step B:
+python scripts/annotate_svs.py \
+    --input ../step_b_IsoClustering/test_data/chr21_SVs_converted.tsv \
     --tree resources/tx_tree_cache.pkl \
     --output results/annotated_regions.csv
 ```
