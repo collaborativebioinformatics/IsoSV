@@ -5,7 +5,7 @@
 ## Team
 Fritz Sedlazeck
 
-Christopher Grochowski 
+Christopher M. Grochowski 
 
 Rupesh Kesharwani
 
