@@ -1,0 +1,12 @@
+{
+  "total_examined": 2001,
+  "total_candidates": 2,
+  "total_skipped": 0,
+  "counts": {
+    "INS": 2
+  },
+  "clusters_found": 1
+}
+
+Human-readable counts by type:
+INS: 2 (100.0%)
