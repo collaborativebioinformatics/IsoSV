@@ -43,3 +43,15 @@ python scripts/annotate_svs.py \
 -   `scripts/`: Contains all executable scripts for this step.
 -   `resources/`: Contains input data and the pre-computed annotation tree (`tx_tree_cache.pkl`).
 -   `results/`: Contains the final annotated output files.
+
+## Annotation Output
+
+The main output of this step is `results/annotated_regions.csv`. This file contains the original SV candidate information from Step B, plus two additional columns: `Annotation` and `Gene(s)`.
+
+The `Annotation` column can have one of the following values:
+
+-   **`Gene_Fusion`**: The SV's coordinates overlap with two or more distinct genes, suggesting a large-scale rearrangement.
+-   **`Exonic_Deletion`**: The SV occurs within a single gene and completely contains at least one of its exons.
+-   **`Canonical_Splicing`**: The SV's coordinates precisely match the boundaries of a known intron (the region between two consecutive exons). This represents a standard splicing event.
+-   **`Intronic/Novel_Splicing`**: An SV that occurs within a single gene but does not fit the criteria for `Exonic_Deletion` or `Canonical_Splicing`. This indicates a potential genomic deletion within an intron or a non-standard splicing event.
+-   **`Intergenic`**: The SV does not overlap with any known gene.
