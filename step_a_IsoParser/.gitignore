@@ -1,0 +1,20 @@
+# Ignore isoSV generated output directory
+isoSV_parser_all/
+
+# Common Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+
+# Virtual envs
+venv/
+env/
+.venv/
+
+# Editor / OS files
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
