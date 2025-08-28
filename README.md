@@ -28,6 +28,10 @@ Detecting structural variants (SVs) from RNA-seq data presents unique challenges
 
 RNA structural variants are any transcript-level rearrangements observed in RNA-seq reads, whereas transcript fusions are specific chimeric transcripts joining exons from two separate genes, often reflecting underlying DNA rearrangements.
 
+## Workflow
+
+<img width="1026" height="799" alt="IsoSV" src="https://github.com/user-attachments/assets/38bc9eb9-8306-4a79-b0bf-d975375897a9" />
+
 ## Presentation
 
 https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-XS0/edit?usp=sharing
