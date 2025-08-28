@@ -1,4 +1,5 @@
 # IsoSV
+A pipeline for detecting structural variants from RNA-Seq Data
 
 <img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
 
@@ -17,7 +18,7 @@
 - [Siyu Wang]
 - [Farhang Jaryani]
 - [Kirtan Dave]
-- [Christopher M. Grochowski (https://github.com/cgrochowski)]
+- [Christopher M. Grochowski] (https://github.com/cgrochowski)
 - [Yousuf Bahit]
 
 ## Overview
@@ -27,15 +28,6 @@ Detecting structural variants (SVs) from RNA-seq data presents unique challenges
 ## Gene/Transcript Fusion vs RNA SV
 
 RNA structural variants are any transcript-level rearrangements observed in RNA-seq reads, whereas transcript fusions are specific chimeric transcripts joining exons from two separate genes, often reflecting underlying DNA rearrangements.
-
-## Workflow
-
-<img width="1026" height="799" alt="IsoSV" src="https://github.com/user-attachments/assets/38bc9eb9-8306-4a79-b0bf-d975375897a9" />
-
-## Presentation
-
-https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-XS0/edit?usp=sharing
-
 
 ## Installation
 
@@ -57,6 +49,23 @@ https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-
     ```bash
     # Command to be added
     ```
+
+## Workflow
+
+The IsoSV workflow for structural variant analysis was designed to identify and evaluate candidate variants from RNA sequencing data. The process begins with parsing BAM files from RNASeq data (Long Read and Short Read), where input BAM alignments are filtered based on mapping quality (XXXX), and candidate variants larger than 30-50 bp are extracted. These candidates are exported into text or VCF files. Next, a data structure for genomic intervals is used to cluster similar candidate entries, generating consolidated variant calls in text or VCF format. To enrich for biological relevance, candidate regions are prioritized using external known annotation resources such as BED or GFF files are incorporated to annotate candidates, producing an updated VCF with annotated structural variants. For visualization, the resulting VCF files are inspected in IGV. Finally, benchmark datasets (HG002) are used for evaluation as a truthset using bedtools and RNASeq coverage profiles to validate expression of the candidate events. To benchmark performance, we constructed a GIAB truth set of large indels by combining two sources: (i) structural variant calls annotated with SVTYPE and SVLEN, and (ii) indel calls derived from reference/alternative allele length differences (≥30 bp). Each variant was represented as a ±10 bp window in BED format. Overlap between Clair3-RNA candidate large indels and GIAB truth sets was assessed using bedtools intersect. Validation was defined as any overlap between candidate and GIAB indels within this positional tolerance.
+
+<img width="1026" height="799" alt="IsoSV" src="https://github.com/user-attachments/assets/38bc9eb9-8306-4a79-b0bf-d975375897a9" />
+
+## Presentation
+
+https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-XS0/edit?usp=sharing
+
+## Examples
+
+<img width="1466" height="870" alt="Screenshot 2025-08-28 at 3 17 39 PM" src="https://github.com/user-attachments/assets/49a444be-b40e-4d44-9d59-4b623191f727" />
+
+
+
 
 
 
