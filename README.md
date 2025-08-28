@@ -1,4 +1,5 @@
 # IsoSV
+A pipeline for detecting structural variants from RNA-Seq Data
 
 <img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
 
