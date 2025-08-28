@@ -1,3 +1,11 @@
+# IsoSV: RNA-seq Structural Variant Discovery
+
+## Overview
+
+IsoSV is a Python-based pipeline for discovering structural variants (SVs) from RNA-seq alignments. This implementation focuses on **Sections 3 & 4** of the project: **Candidate Structuring (Intervals)** and **Clustering & Deduplication**.
+
+## What You've Built
+
 ### 1. Interval Tree Infrastructure (`code/isosv/struct/intervals.py`)
 
 - **`Candidate`** dataclass: Represents per-read SV candidates with genomic coordinates, SV type, and metadata
@@ -37,6 +45,27 @@ nearby = structurer.get_overlapping_candidates(candidate, window=100)
 ```
 
 ## File Structure
+
+IsoSV/
+├── code/
+│ ├── isosv/
+│ │ └── struct/
+│ │ └── intervals.py # Core interval tree implementation
+│ └── test_intervals.py # Testing and data conversion
+├── test_data/
+│ ├── chr21_SVs.txt # Original SV data
+│ └── chr21_SVs_converted.tsv # Converted clustered format
+└── README.md
+
+
+## Data Formats
+
+### Input: Original SV Format
+chr start end svtype svlen
+chr21 5227407 5227477 DEL -70
+chr21 5276291 5276291 INS 2560
+
+### Output: Clustered Interval Format
 chrom start end type support median_sv_len reads genes
 21 5227407 5227477 DEL 1 70
 21 5276291 5276307 INS 1 2560
