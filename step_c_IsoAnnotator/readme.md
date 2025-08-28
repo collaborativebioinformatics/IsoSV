@@ -15,13 +15,13 @@ The process is divided into two main stages: a one-time pre-computation and the 
 First, prepare the annotation database.
 
 ```bash
-# Filter the raw GTF file
+# Filter the raw GTF file, generate resources/cleaned_annotations.gtf
 bash scripts/01_preprocess.sh
 
-# Build the fast lookup tree
+# Build the fast lookup tree, using resources/cleaned_annotations.gtf
 python scripts/02_build_gene_table_and_trees.py
 ```
-This will generate the `tx_tree_cache.pkl` file in the `resources/` directory.
+This will generate the `tx_tree_cache.pkl` file in the `resources/` directory (fast, reusable lookup database - the IntervalTree).
 
 **2. Run Annotation**
 
