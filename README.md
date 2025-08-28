@@ -1,71 +1,95 @@
-# IsoSV
+### 1. Interval Tree Infrastructure (`code/isosv/struct/intervals.py`)
 
-<img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
+- **`Candidate`** dataclass: Represents per-read SV candidates with genomic coordinates, SV type, and metadata
+- **`ClusterSV`** dataclass: Represents clustered/consensus SVs with support counts and confidence intervals
+- **`CandidateStructurer`** class: Manages candidates using interval trees for efficient spatial queries
+- **`intervaltree` package integration**: Robust interval tree implementation for fast overlap queries
 
-## Team
-Fritz Sedlazeck
+### 2. Testing & Validation (`code/test_intervals.py`)
 
-Christopher Grochowski 
+- **Data converter**: Transforms `test_data/chr21_SVs.txt` → `test_data/chr21_SVs_converted.tsv`
+- **Interval tree testing**: Loads real chr21 SV data and tests tree operations
+- **Query validation**: Tests region queries, point queries, and overlap detection
 
-Rupesh Kesharwani
+## Key Features
 
-Siyu Wang
+### Interval Tree Operations
+- **Fast spatial queries** by chromosome and SV type
+- **Efficient overlap detection** for clustering candidates
+- **Point queries** for specific genomic positions
+- **Region queries** for genomic intervals
 
-Farhang Jaryani
+### Data Handling
+- **Flexible input formats**: Handles both raw SV calls and clustered intervals
+- **Automatic coordinate normalization**: Ensures consistent chromosome naming
+- **INS expansion**: Converts point insertions to intervals using length information
 
-Van Truong
+### Query Capabilities
+```python
+# Region query
+candidates = structurer.query_region("chr21", "DEL", 1000000, 2000000)
 
-Minhang Xu
+# Point query  
+candidates = structurer.query_point("chr21", "INS", 5000000)
 
-Memoona Rasheed
+# Overlap detection
+nearby = structurer.get_overlapping_candidates(candidate, window=100)
+```
 
-Kirtan Dave
-
-Aisha Yousaf
-
-Bigy Ambat
-
-Louis SHE
-
-Pu Kao (Paul)
-
-Yousuf Bahit
-
-Bharati Jadhav 
-
-## Overview
-
-Detecting structural variants (SVs) from RNA-seq data presents unique challenges. Unlike DNA sequencing, RNA reads span spliced transcripts, resulting in complex CIGAR patterns that include skipped regions (N), soft-clips, insertions, deletions, and split alignments. Standard DNA-based SV callers often misinterpret these signals, leading to missed or misclassified events. To overcome this, we developed a pipeline i.e. IsoSV that scans RNA-seq BAM files to identify candidate SVs by parsing CIGAR operations, split-read (SA) tags, and, optionally, exon annotations. The method distinguishes expected introns from potential novel splice junctions or structural rearrangements, reporting each event in both TSV and VCF formats to enable comprehensive detection and downstream analysis of SVs from RNA-seq data. At the end we are validating these SV finding with known DNA variants. 
-
-## Gene/Transcript Fusion vs RNA SV
-
-RNA structural variants are any transcript-level rearrangements observed in RNA-seq reads, whereas transcript fusions are specific chimeric transcripts joining exons from two separate genes, often reflecting underlying DNA rearrangements.
-
-## Presentation
-
-https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-XS0/edit?usp=sharing
+## File Structure
+chrom start end type support median_sv_len reads genes
+21 5227407 5227477 DEL 1 70
+21 5276291 5276307 INS 1 2560
 
 
-## Installation
+## Usage
 
-### 🚀 **Getting Started**
+### 1. Convert Data Format
+```bash
+python code/test_intervals.py --convert
+```
+Converts `test_data/chr21_SVs.txt` to clustered format.
 
-*(This section will be updated soon)*
+### 2. Test Interval Trees
+```bash
+python code/test_intervals.py
+```
+Loads converted data and tests interval tree functionality.
 
-1.  **Clone the repository:**
-   
-    ```bash
-    git clone https://github.com/collaborativebioinformatics/IsoSV.git
-    
-    ```
-3.  **Set up the environment:**
-    ```bash
-    # Command to be added
-    ```
-4.  **Run the pipeline:**
-    ```bash
-    # Command to be added
-    ```
+### 3. Use in Your Code
+```python
+from isosv.struct.intervals import CandidateStructurer, Candidate
 
+# Initialize
+structurer = CandidateStructurer()
 
+# Add candidates
+candidate = Candidate(chrom="chr21", pos=1000, end=1050, ...)
+structurer.add_candidate(candidate)
 
+# Query
+results = structurer.query_region("chr21", "DEL", 1000, 1100)
+```
+
+## Dependencies
+
+```bash
+pip install intervaltree pandas
+```
+
+## What This Enables
+
+1. **Efficient SV Clustering**: Fast detection of nearby candidates for merging
+2. **Spatial Queries**: Quick lookup of SVs in specific genomic regions
+3. **Support for Large Datasets**: Interval trees scale well with chromosome-sized data
+4. **Foundation for Clustering**: Ready for implementing the clustering algorithms in Section 4
+
+## Next Steps
+
+This implementation provides the foundation for:
+- **Clustering algorithms** (single-linkage, density-based)
+- **Consensus calculation** (median positions, confidence intervals)
+- **Quality filtering** (support thresholds, MAPQ filtering)
+- **VCF output** generation
+
+The interval tree infrastructure efficiently handles the spatial organization needed for clustering thousands of SV candidates across the genome.
