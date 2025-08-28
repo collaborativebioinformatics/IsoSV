@@ -17,7 +17,7 @@
 - [Siyu Wang]
 - [Farhang Jaryani]
 - [Kirtan Dave]
-- [Christopher Grochowski]
+- [Christopher M. Grochowski (https://github.com/cgrochowski)]
 - [Yousuf Bahit]
 
 ## Overview
