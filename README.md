@@ -3,35 +3,22 @@
 <img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
 
 ## Team
-Fritz Sedlazeck
-
-Christopher M. Grochowski 
-
-Rupesh Kesharwani
-
-Siyu Wang
-
-Farhang Jaryani
-
-Van Truong
-
-Minhang Xu
-
-Memoona Rasheed
-
-Kirtan Dave
-
-Aisha Yousaf
-
-Bigy Ambat
-
-Louis SHE
-
-Pu Kao (Paul)
-
-Yousuf Bahit
-
-Bharati Jadhav 
+- [Fritz Sedlazeck](https://github.com/fritzsedlazeck)
+- [Rupesh Kesharwani](https://github.com/unique379r)
+- [Van Truong](https://github.com/van-truong)
+- [Minhang Xu](https://github.com/MinhangXu)
+- [Memoona Rasheed](https://github.com/MemoonaRasheed)
+- [Aisha Yousaf](https://github.com/AishaYousaf)
+- [Bigy Ambat](https://github.com/bigyambat)
+- [Louis She](https://github.com/snakesch)
+- [Pu Kao (Paul)](https://github.com/isthatgopro)
+- [Bharati Jadhav](https://github.com/bharatij)
+- [Saolendra](https://github.com/sailepradh)
+- [Siyu Wang]
+- [Farhang Jaryani]
+- [Kirtan Dave]
+- [Christopher Grochowski]
+- [Yousuf Bahit]
 
 ## Overview
 
