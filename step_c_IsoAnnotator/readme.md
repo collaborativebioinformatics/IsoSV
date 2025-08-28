@@ -15,13 +15,16 @@ The process is divided into two main stages: a one-time pre-computation and the 
 First, prepare the annotation database.
 
 ```bash
-# Filter the raw GTF file, generate resources/cleaned_annotations.gtf
+# 1. Filter the raw GTF to create a clean, high-confidence annotation set.
+# This generates resources/cleaned_annotations.gtf
 bash scripts/01_preprocess.sh
 
-# Build the fast lookup tree, using resources/cleaned_annotations.gtf
+# 2. Process the cleaned GTF to build fast lookup databases.
 python scripts/02_build_gene_table_and_trees.py
 ```
-This will generate the `tx_tree_cache.pkl` file in the `resources/` directory (fast, reusable lookup database - the IntervalTree).
+This performs two key actions:
+1.  **Builds a Gene BED File**: It creates `resources/gencode.v43.annotation.genes.bed`, a file containing the genomic coordinates for every gene, which can be used for broad, gene-level SV searches.
+2.  **Generates the Interval Tree Cache**: It produces `resources/tx_tree_cache.pkl`. This file is a pre-compiled lookup database (an IntervalTree) that maps every transcript and its individual exons to their precise genomic locations, enabling high-speed annotation queries.
 
 **2. Run Annotation**
 
