@@ -18,7 +18,7 @@ A pipeline for detecting structural variants from RNA-Seq Data
 - [Siyu Wang]
 - [Farhang Jaryani]
 - [Kirtan Dave]
-- [Christopher M. Grochowski (https://github.com/cgrochowski)]
+- [Christopher M. Grochowski] (https://github.com/cgrochowski)
 - [Yousuf Bahit]
 
 ## Overview
