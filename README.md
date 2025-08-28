@@ -39,6 +39,10 @@ The IsoSV workflow for structural variant analysis was designed to identify and 
 
 https://docs.google.com/presentation/d/1-pTwId0y6V8OCrv-FYEJuwpxVq7wN8G9hY5ynpy-XS0/edit?usp=sharing
 
+## Examples
+
+<img width="1466" height="870" alt="Screenshot 2025-08-28 at 3 17 39 PM" src="https://github.com/user-attachments/assets/49a444be-b40e-4d44-9d59-4b623191f727" />
+
 
 ## Installation
 
