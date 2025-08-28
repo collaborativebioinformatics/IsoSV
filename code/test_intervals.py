@@ -1,5 +1,9 @@
 """
 Test script for the interval tree functionality using the intervaltree package.
+Also provides a converter to transform test_data/chr21_SVs.txt into
+clustered-interval format with columns:
+
+chrom	start	end	type	support	median_sv_len	reads	genes
 """
 
 import sys
@@ -7,48 +11,64 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'isosv'))
 
 from isosv.struct.intervals import Candidate, CandidateStructurer
+import argparse
+import pandas as pd
 
 
-def create_test_candidates():
-    """Create test candidates for demonstration."""
+def _add_chr_prefix(val: str) -> str:
+    s = str(val).strip()
+    return s if s.startswith("chr") else f"chr{s}"
+
+
+def load_clustered_candidates_from_converted(tsv_path: str):
+    """Load candidates from the converted clustered TSV.
+
+    Expects columns: chrom, start, end, type, support, median_sv_len, reads, genes
+    Emits ONE Candidate per row (not expanded by reads/support) for testing trees.
+    """
+    df = pd.read_csv(tsv_path, sep='\t')
+    required = ["chrom", "start", "end", "type", "support", "median_sv_len", "reads", "genes"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
     candidates = []
-    
-    # Create some test candidates with overlapping regions
-    test_data = [
-        # Chrom, pos, end, svtype, svlen, read, strand, mapq, cigar, prim
-        ("chr21", 1000, 1050, "DEL", 50, "read1", "+", 30, "50M50D50M", True),
-        ("chr21", 1005, 1055, "DEL", 50, "read2", "+", 25, "50M50D50M", True),
-        ("chr21", 1010, 1060, "DEL", 50, "read3", "-", 35, "50M50D50M", True),
-        ("chr21", 2000, 2100, "INS", 100, "read4", "+", 40, "50M100I50M", True),
-        ("chr21", 2005, 2105, "INS", 100, "read5", "+", 30, "50M100I50M", True),
-        ("chr21", 3000, 3050, "DEL", 50, "read6", "+", 30, "50M50D50M", True),
-        ("chr21", 3000, 3100, "DEL", 100, "read7", "-", 35, "50M100D50M", True),
-        ("chr22", 1000, 1050, "DEL", 50, "read8", "+", 30, "50M50D50M", True),
-    ]
-    
-    for i, (chrom, pos, end, svtype, svlen, read, strand, mapq, cigar, prim) in enumerate(test_data):
-        candidate = Candidate(
-            chrom=chrom,
-            pos=pos,
-            end=end,
-            svtype=svtype,
-            svlen=svlen,
-            read=read,
-            strand=strand,
-            mapq=mapq,
-            cigar=cigar,
-            prim=prim,
-            flags={'test': True, 'index': i}
+    for i, row in df.iterrows():
+        chrom = _add_chr_prefix(row["chrom"])  # ensure chr prefix for queries
+        start = int(row["start"])
+        end = int(row["end"]) if pd.notna(row["end"]) else start
+        svtype = str(row["type"]).upper()
+        svlen = int(abs(row["median_sv_len"])) if pd.notna(row["median_sv_len"]) else 0
+
+        # Expand INS point to short span using svlen (>=1)
+        if svtype == "INS" and start == end:
+            end = start + max(1, svlen)
+
+        candidates.append(
+            Candidate(
+                chrom=chrom,
+                pos=start,
+                end=end,
+                svtype=svtype,
+                svlen=svlen,
+                read=f"row_{i+1}",
+                strand="+",
+                mapq=60,
+                cigar="",
+                prim=True,
+                flags={"support": int(row["support"]) if pd.notna(row["support"]) else 1,
+                       "genes": str(row["genes"]) if pd.notna(row["genes"]) else ""}
+            )
         )
-        candidates.append(candidate)
-    
     return candidates
 
 
 def test_interval_tree():
-    """Test the interval tree functionality."""
-    print("Creating test candidates...")
-    candidates = create_test_candidates()
+    """Test the interval tree functionality with converted clustered TSV."""
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    converted = os.path.join(project_root, "test_data", "chr21_SVs_converted.tsv")
+    print(f"Loading candidates from {converted} ...")
+    candidates = load_clustered_candidates_from_converted(converted)
     
     print(f"Created {len(candidates)} test candidates")
     
@@ -68,26 +88,49 @@ def test_interval_tree():
     for key, stat in stats.items():
         print(f"  {key}: {stat['size']} intervals")
     
-    # Test interval queries
-    print("\n--- Testing interval queries ---")
-    
-    # Test region query
-    chr21_dels = structurer.query_region("chr21", "DEL", 1000, 1100)
-    print(f"chr21 DEL candidates in region 1000-1100: {len(chr21_dels)}")
-    for c in chr21_dels:
-        print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype} (read={c.read})")
-    
-    # Test point query
-    chr21_ins_at_2000 = structurer.query_point("chr21", "INS", 2000)
-    print(f"\nchr21 INS candidates at position 2000: {len(chr21_ins_at_2000)}")
-    for c in chr21_ins_at_2000:
-        print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype} (read={c.read})")
-    
-    # Test overlap query
-    chr21_dels_overlap_3000 = structurer.query_overlap("chr21", "DEL", 3000, 3100)
-    print(f"\nchr21 DEL candidates overlapping 3000-3100: {len(chr21_dels_overlap_3000)}")
-    for c in chr21_dels_overlap_3000:
-        print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype} (read={c.read})")
+    # Test interval queries (driven by the data in the TSV)
+    print("\n--- Testing interval queries (data-driven) ---")
+
+    dels = [c for c in candidates if c.svtype == "DEL"]
+    ins  = [c for c in candidates if c.svtype == "INS"]
+
+    # Region query: around the first DEL in the TSV
+    if dels:
+        d0 = dels[0]
+        w = max(50, min(500, d0.svlen if d0.svlen and d0.svlen > 0 else 100))
+        rstart, rend = max(0, d0.pos - w), d0.end + w
+        hits = structurer.query_region(d0.chrom, d0.svtype, rstart, rend)
+        print(f"Region query around first DEL {d0.chrom}:{d0.pos}-{d0.end} (±{w}): {len(hits)} hits")
+        for c in hits[:10]:
+            print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype}")
+        if len(hits) > 10:
+            print(f"  ... {len(hits)-10} more")
+    else:
+        print("No DEL entries in the TSV for region query.")
+
+    # Point query: at the first INS position
+    if ins:
+        i0 = ins[0]
+        p_hits = structurer.query_point(i0.chrom, i0.svtype, i0.pos)
+        print(f"\nPoint query at first INS {i0.chrom}:{i0.pos}: {len(p_hits)} hits")
+        for c in p_hits[:10]:
+            print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype}")
+    else:
+        print("\nNo INS entries in the TSV for point query.")
+
+    # Overlap query: use a mid DEL (or any candidate if not enough)
+    target = dels[len(dels)//2] if len(dels) >= 3 else (dels[0] if dels else (ins[0] if ins else None))
+    if target:
+        ov_w = 100
+        ostart, oend = max(0, target.pos - ov_w), target.end + ov_w
+        ov_hits = structurer.query_overlap(target.chrom, target.svtype, ostart, oend)
+        print(f"\nOverlap query around {target.chrom}:{target.pos}-{target.end} {target.svtype} (±{ov_w}): {len(ov_hits)} hits")
+        for c in ov_hits[:10]:
+            print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype}")
+        if len(ov_hits) > 10:
+            print(f"  ... {len(ov_hits)-10} more")
+    else:
+        print("\nNo suitable candidate found for overlap query.")
     
     # Test overlapping candidates with window
     print("\n--- Testing overlapping candidates with window ---")
@@ -100,10 +143,69 @@ def test_interval_tree():
     
     # Test tree visualization
     print("\n--- Tree visualization ---")
-    print(structurer.get_tree_visualization("chr21", "DEL"))
+    if dels:
+        print(structurer.get_tree_visualization(dels[0].chrom, "DEL"))
+    elif ins:
+        print(structurer.get_tree_visualization(ins[0].chrom, "INS"))
+    else:
+        print("No candidates to visualize.")
     
     print("\nTest completed!")
 
 
+def convert_chr21_to_clustered(in_path: str, out_path: str) -> None:
+    """Convert chr21_SVs.txt (chr,start,end,svtype,svlen) to clustered format.
+
+    Output columns: chrom,start,end,type,support,median_sv_len,reads,genes
+    - chrom: strip 'chr' prefix if present (e.g., 'chr21' -> '21')
+    - type: from svtype
+    - support: default 1 (one row per input SV)
+    - median_sv_len: abs(svlen) or 1 if missing/NA
+    - reads: empty
+    - genes: empty
+    Rows with missing start/end are skipped.
+    """
+    df = pd.read_csv(in_path, sep="\t")
+    required = ["chr", "start", "end", "svtype", "svlen"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Input is missing required columns: {missing}")
+
+    def strip_chr(x: str) -> str:
+        s = str(x)
+        return s[3:] if s.startswith("chr") else s
+
+    out = pd.DataFrame()
+    out["chrom"] = df["chr"].map(strip_chr)
+    # Drop rows with NA start/end
+    valid = df["start"].notna() & df["end"].notna()
+    df = df[valid].copy()
+    out = out.loc[valid].copy()
+
+    out["start"] = df["start"].astype(int)
+    out["end"] = df["end"].astype(int)
+    out["type"] = df["svtype"].astype(str)
+    # Default support 1
+    out["support"] = 1
+    # median_sv_len: abs of svlen; coerce errors -> NaN then fill with 1
+    svlen = pd.to_numeric(df["svlen"], errors="coerce").abs().fillna(1).astype(int)
+    out["median_sv_len"] = svlen
+    out["reads"] = ""
+    out["genes"] = ""
+
+    out.to_csv(out_path, sep="\t", index=False)
+    print(f"Wrote converted clustered TSV: {out_path} (rows={len(out)})")
+
+
 if __name__ == "__main__":
-    test_interval_tree()
+    parser = argparse.ArgumentParser(description="Interval tree tester and chr21 converter")
+    parser.add_argument("--convert", action="store_true", help="Convert chr21_SVs.txt to clustered format")
+    args = parser.parse_args()
+
+    if args.convert:
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        in_path = os.path.join(project_root, "test_data", "chr21_SVs.txt")
+        out_path = os.path.join(project_root, "test_data", "chr21_SVs_converted.tsv")
+        convert_chr21_to_clustered(in_path, out_path)
+    else:
+        test_interval_tree()
