@@ -20,7 +20,7 @@ def main():
 
     # Open the input and output files
     with open(args.input, 'r') as infile, open(args.output, 'w', newline='') as outfile:
-        reader = csv.DictReader(infile)
+        reader = csv.DictReader(infile, delimiter='\t')
         fieldnames = reader.fieldnames + ["Annotation", "Gene(s)"]
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
