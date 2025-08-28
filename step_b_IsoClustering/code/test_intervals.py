@@ -1,4 +1,8 @@
 """
+Created: 08.28.2025 
+Authors: Bigy Ambat, Memoona Rasheed
+Maintainer: Bigy Ambat
+
 Test script for the interval tree functionality using the intervaltree package.
 Also provides a converter to transform test_data/chr21_SVs.txt into
 clustered-interval format with columns:
