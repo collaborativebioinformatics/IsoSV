@@ -158,6 +158,167 @@ def load_per_read_candidates(tsv_path: str):
         return []
 
 
+def load_clustered_summary_candidates(tsv_path: str):
+    """Load candidates from the clustered summary TSV format.
+    
+    Expected columns:
+    chrom, pos, end, svtype, length, support, median_mapq, example_reads, example_ins_seq, genes
+    
+    This format appears to be pre-clustered with summary statistics.
+    """
+    try:
+        # Read the file and skip comment lines
+        with open(tsv_path, 'r') as f:
+            lines = f.readlines()
+        
+        # Filter out comment lines and empty lines
+        data_lines = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
+        
+        if not data_lines:
+            print("No data lines found after filtering comments")
+            return []
+        
+        # Parse the header (first non-comment line)
+        header = data_lines[0].split('\t')
+        print(f"Found clustered summary header with {len(header)} columns: {header}")
+        
+        # Check for required columns
+        required_cols = ['chrom', 'pos', 'end', 'svtype', 'length']
+        missing_cols = [col for col in required_cols if col not in header]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+        
+        # Create column index mapping
+        col_indices = {col: header.index(col) for col in header}
+        
+        candidates = []
+        for i, line in enumerate(data_lines[1:], 1):  # Skip header, start from line 1
+            try:
+                parts = line.split('\t')
+                if len(parts) != len(header):
+                    print(f"Warning: Line {i+1} has {len(parts)} parts, expected {len(header)}. Skipping.")
+                    continue
+                
+                # Parse chromosome
+                chrom = _add_chr_prefix(parts[col_indices['chrom']])
+                
+                # Parse positions
+                pos_start = int(parts[col_indices['pos']])
+                pos_end = int(parts[col_indices['end']])
+                
+                # Parse SV type and length
+                sv_type = str(parts[col_indices['svtype']]).upper()
+                sv_len = int(abs(int(parts[col_indices['length']]))) if parts[col_indices['length']] != '.' else 0
+                
+                # Handle special cases for different SV types
+                if sv_type == 'INS':
+                    # For insertions, pos_start == pos_end, expand by sv_len
+                    if pos_start == pos_end and sv_len > 0:
+                        pos_end = pos_start + sv_len
+                    elif pos_start == pos_end:
+                        pos_end = pos_start + 1  # Minimum span
+                
+                # Parse read information
+                read_name = str(parts[col_indices.get('example_reads', '')]) if parts[col_indices.get('example_reads', '')] != '.' else f"read_{i}"
+                strand = "+"  # Default strand for clustered format
+                
+                # Parse MAPQ (handle missing values)
+                try:
+                    mapq_str = parts[col_indices.get('median_mapq', '60')]
+                    mapq = int(mapq_str) if mapq_str != '.' else 30
+                except (ValueError, TypeError):
+                    mapq = 30
+                
+                # Parse CIGAR (not available in this format, use empty string)
+                cigar = ""
+                
+                # Determine if primary alignment
+                is_primary = True  # Default assumption
+                
+                # Parse additional flags
+                support = int(parts[col_indices.get('support', '1')]) if parts[col_indices.get('support', '1')] != '.' else 1
+                genes = str(parts[col_indices.get('genes', '')]) if parts[col_indices.get('genes', '')] != '.' else ""
+                ins_seq = str(parts[col_indices.get('example_ins_seq', '')]) if parts[col_indices.get('example_ins_seq', '')] != '.' else ""
+                
+                flags = {
+                    'support': support,
+                    'genes': genes,
+                    'ins_seq': ins_seq,
+                    'format': 'clustered_summary',
+                    'original_pos': pos_start,
+                    'original_end': pos_end
+                }
+                
+                candidate = Candidate(
+                    chrom=chrom,
+                    pos=pos_start,
+                    end=pos_end,
+                    svtype=sv_type,
+                    svlen=sv_len,
+                    read=read_name,
+                    strand=strand,
+                    mapq=mapq,
+                    prim=is_primary,
+                    cigar=cigar,
+                    flags=flags
+                )
+                candidates.append(candidate)
+                
+            except Exception as e:
+                print(f"Warning: Skipping line {i+1} due to error: {e}")
+                continue
+        
+        print(f"Successfully parsed {len(candidates)} clustered summary candidates")
+        return candidates
+        
+    except Exception as e:
+        print(f"Error loading clustered summary TSV file: {e}")
+        return []
+
+
+def auto_detect_format_and_load(tsv_path: str):
+    """Automatically detect the TSV format and load candidates accordingly.
+    
+    Tries to determine if it's per-read format or clustered summary format
+    based on the column headers.
+    """
+    try:
+        # Read the first few lines to detect format
+        with open(tsv_path, 'r') as f:
+            lines = f.readlines()
+        
+        # Filter out comment lines and empty lines
+        data_lines = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
+        
+        if not data_lines:
+            print("No data lines found after filtering comments")
+            return []
+        
+        # Parse the header
+        header = data_lines[0].split('\t')
+        print(f"Detected header with columns: {header}")
+        
+        # Check for format-specific columns
+        per_read_indicators = ['pos_start', 'pos_end', 'read_name', 'sv_type']
+        clustered_indicators = ['pos', 'end', 'svtype', 'length', 'support']
+        
+        per_read_score = sum(1 for col in per_read_indicators if col in header)
+        clustered_score = sum(1 for col in clustered_indicators if col in header)
+        
+        print(f"Format detection scores - Per-read: {per_read_score}, Clustered: {clustered_score}")
+        
+        if per_read_score >= clustered_score:
+            print("Detected per-read format, using load_per_read_candidates")
+            return load_per_read_candidates(tsv_path)
+        else:
+            print("Detected clustered summary format, using load_clustered_summary_candidates")
+            return load_clustered_summary_candidates(tsv_path)
+            
+    except Exception as e:
+        print(f"Error in format detection: {e}")
+        return []
+
+
 def test_interval_tree_with_candidates(candidates):
     """Test the interval tree functionality with provided candidates."""
     if not candidates:
@@ -263,27 +424,42 @@ def test_interval_tree_with_candidates(candidates):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="IsoSV Interval Tree Tester - Tests interval trees with per-read SV candidates",
+        description="IsoSV Interval Tree Tester - Tests interval trees with multiple TSV formats",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test with per-read TSV format
+  # Test with auto-detected format (recommended)
   python test_intervals.py --input my_svs.tsv
   
   # Test with custom window size
   python test_intervals.py --input my_svs.tsv --window 200
+  
+  # Force per-read format
+  python test_intervals.py --input my_svs.tsv --format per-read
+  
+  # Force clustered format
+  python test_intervals.py --input my_svs.tsv --format clustered
         """
     )
     
     parser.add_argument("--input", "-i", type=str, required=True,
-                       help="Input TSV file with per-read SV candidates")
+                       help="Input TSV file with SV candidates")
+    parser.add_argument("--format", choices=['auto', 'per-read', 'clustered'], default='auto',
+                       help="TSV format to use (default: auto-detect)")
     parser.add_argument("--window", "-w", type=int, default=100,
                        help="Window size for overlap testing (default: 100)")
     
     args = parser.parse_args()
 
-    print(f"Loading per-read candidates from: {args.input}")
-    candidates = load_per_read_candidates(args.input)
+    print(f"Loading candidates from: {args.input}")
+    
+    if args.format == 'auto':
+        candidates = auto_detect_format_and_load(args.input)
+    elif args.format == 'per-read':
+        candidates = load_per_read_candidates(args.input)
+    elif args.format == 'clustered':
+        candidates = load_clustered_summary_candidates(args.input)
+    
     if candidates:
         test_interval_tree_with_candidates(candidates)
     else:
