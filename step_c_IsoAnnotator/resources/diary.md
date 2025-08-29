@@ -19,7 +19,7 @@ Follow ups:
 Louis progress: 
 - Fixed a bug in tx tree construction, tx_tree can now pinpoint exact overlapping gene regions
 - Added code based on the reconstructed tx tree for SV annotation (INS associated gene fusions will need extensive work into BAM?)
-	- Current code in `annotate.py`, still in tsv format
-- Not yet converted to VCF format
+	- Current code in `annotate.py`
+	- skeleton code for vcf output done, but contig headers missing (idk which version of hg38 is used here ...)
 - Not yet tested on most up-to-date step b files
 - Refactored the old 01 02 scripts 
