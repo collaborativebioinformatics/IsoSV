@@ -8,6 +8,8 @@
 - [GIAB002_chr22_region.bam](https://drive.google.com/drive/folders/1y48dxKJYkRXxDcEt6kTNbaEs6qCvUD8I?usp=drive_link)
 
 **Short Read**
+
+- [chr21.bam](https://drive.google.com/drive/folders/1udSRBNAhaS4xwd-hQ0pE4PgLi8kSQbXB)
 - [chr22.bam](https://drive.google.com/drive/folders/1udSRBNAhaS4xwd-hQ0pE4PgLi8kSQbXB)
 
 ---
