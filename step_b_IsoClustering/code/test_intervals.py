@@ -1,9 +1,6 @@
 """
 Test script for the interval tree functionality using the intervaltree package.
-Also provides a converter to transform test_data/chr21_SVs.txt into
-clustered-interval format with columns:
-
-chrom	start	end	type	support	median_sv_len	reads	genes
+Supports the new per-read TSV format with detailed SV information.
 """
 
 import sys
@@ -16,61 +13,131 @@ import pandas as pd
 
 
 def _add_chr_prefix(val: str) -> str:
+    """Ensure chromosome names have 'chr' prefix for consistency."""
     s = str(val).strip()
     return s if s.startswith("chr") else f"chr{s}"
 
 
-def load_clustered_candidates_from_converted(tsv_path: str):
-    """Load candidates from the converted clustered TSV.
-
-    Expects columns: chrom, start, end, type, support, median_sv_len, reads, genes
-    Emits ONE Candidate per row (not expanded by reads/support) for testing trees.
-    """
-    df = pd.read_csv(tsv_path, sep='\t')
-    required = ["chrom", "start", "end", "type", "support", "median_sv_len", "reads", "genes"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-
-    candidates = []
-    for i, row in df.iterrows():
-        chrom = _add_chr_prefix(row["chrom"])  # ensure chr prefix for queries
-        start = int(row["start"])
-        end = int(row["end"]) if pd.notna(row["end"]) else start
-        svtype = str(row["type"]).upper()
-        svlen = int(abs(row["median_sv_len"])) if pd.notna(row["median_sv_len"]) else 0
-
-        # Expand INS point to short span using svlen (>=1)
-        if svtype == "INS" and start == end:
-            end = start + max(1, svlen)
-
-        candidates.append(
-            Candidate(
-                chrom=chrom,
-                pos=start,
-                end=end,
-                svtype=svtype,
-                svlen=svlen,
-                read=f"row_{i+1}",
-                strand="+",
-                mapq=60,
-                cigar="",
-                prim=True,
-                flags={"support": int(row["support"]) if pd.notna(row["support"]) else 1,
-                       "genes": str(row["genes"]) if pd.notna(row["genes"]) else ""}
-            )
-        )
-    return candidates
 
 
-def test_interval_tree():
-    """Test the interval tree functionality with converted clustered TSV."""
-    project_root = os.path.dirname(os.path.dirname(__file__))
-    converted = os.path.join(project_root, "test_data", "chr21_SVs_converted.tsv")
-    print(f"Loading candidates from {converted} ...")
-    candidates = load_clustered_candidates_from_converted(converted)
+def _parse_strand(orientation: str) -> str:
+    """Parse orientation field to determine read strand."""
+    if pd.isna(orientation) or orientation == '.':
+        return "+"
     
-    print(f"Created {len(candidates)} test candidates")
+    orientation = str(orientation).strip()
+    
+    # Handle various orientation formats
+    if orientation.startswith('F'):
+        return "+"
+    elif orientation.startswith('R'):
+        return "-"
+    elif orientation in ['+', '-']:
+        return orientation
+    else:
+        return "+"  # Default to forward
+
+
+def load_per_read_candidates(tsv_path: str):
+    """Load candidates from the new per-read TSV format.
+    
+    Expected columns:
+    chrom, pos_start, pos_end, read_name, sv_type, sv_len, note, read_len, 
+    cigar, MAPQ, TLEN, MATE_UNMAPPED, IS_PROPER_PAIR, ORIENTATION, SEQ
+    """
+    try:
+        df = pd.read_csv(tsv_path, sep='\t')
+        print(f"Loaded TSV with {len(df)} rows and columns: {list(df.columns)}")
+        
+        # Check for required columns
+        required_cols = ['chrom', 'pos_start', 'pos_end', 'read_name', 'sv_type']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+        
+        candidates = []
+        for i, row in df.iterrows():
+            try:
+                # Parse chromosome
+                chrom = _add_chr_prefix(row['chrom'])
+                
+                # Parse positions
+                pos_start = int(row['pos_start'])
+                pos_end = int(row['pos_end'])
+                
+                # Parse SV type and length
+                sv_type = str(row['sv_type']).upper()
+                sv_len = int(abs(row['sv_len'])) if pd.notna(row['sv_len']) else 0
+                
+                # Handle special cases for different SV types
+                if sv_type == 'INS':
+                    # For insertions, pos_start == pos_end, expand by sv_len
+                    if pos_start == pos_end and sv_len > 0:
+                        pos_end = pos_start + sv_len
+                    elif pos_start == pos_end:
+                        pos_end = pos_start + 1  # Minimum span
+                
+                # Parse read information
+                read_name = str(row['read_name']) if pd.notna(row['read_name']) else f"read_{i+1}"
+                strand = _parse_strand(row.get('ORIENTATION', '+'))
+                
+                # Parse MAPQ (handle missing values)
+                try:
+                    mapq = int(row['MAPQ']) if pd.notna(row['MAPQ']) and str(row['MAPQ']) != '.' else 30
+                except (ValueError, TypeError):
+                    mapq = 30
+                
+                # Parse CIGAR
+                cigar = str(row['cigar']) if pd.notna(row['cigar']) else ""
+                
+                # Determine if primary alignment
+                is_primary = True  # Default assumption
+                
+                # Parse additional flags
+                flags = {
+                    'note': str(row['note']) if pd.notna(row['note']) else "",
+                    'read_len': int(row['read_len']) if pd.notna(row['read_len']) else 0,
+                    'tlen': int(row['TLEN']) if pd.notna(row['TLEN']) and str(row['TLEN']) != '.' else 0,
+                    'mate_unmapped': bool(row['MATE_UNMAPPED']) if pd.notna(row['MATE_UNMAPPED']) else False,
+                    'is_proper_pair': bool(row['IS_PROPER_PAIR']) if pd.notna(row['IS_PROPER_PAIR']) else False,
+                    'orientation': str(row['ORIENTATION']) if pd.notna(row['ORIENTATION']) else "+",
+                    'seq': str(row['SEQ']) if pd.notna(row['SEQ']) else ""
+                }
+                
+                candidate = Candidate(
+                    chrom=chrom,
+                    pos=pos_start,
+                    end=pos_end,
+                    svtype=sv_type,
+                    svlen=sv_len,
+                    read=read_name,
+                    strand=strand,
+                    mapq=mapq,
+                    cigar=cigar,
+                    prim=is_primary,
+                    flags=flags
+                )
+                candidates.append(candidate)
+                
+            except Exception as e:
+                print(f"Warning: Skipping row {i+1} due to error: {e}")
+                continue
+        
+        print(f"Successfully parsed {len(candidates)} candidates")
+        return candidates
+        
+    except Exception as e:
+        print(f"Error loading TSV file: {e}")
+        return []
+
+
+def test_interval_tree_with_candidates(candidates):
+    """Test the interval tree functionality with provided candidates."""
+    if not candidates:
+        print("No candidates to test!")
+        return
+    
+    print(f"Testing with {len(candidates)} candidates")
     
     # Test structurer
     print("\nTesting candidate structurer with intervaltree...")
@@ -92,7 +159,9 @@ def test_interval_tree():
     print("\n--- Testing interval queries (data-driven) ---")
 
     dels = [c for c in candidates if c.svtype == "DEL"]
-    ins  = [c for c in candidates if c.svtype == "INS"]
+    ins = [c for c in candidates if c.svtype == "INS"]
+    softclips = [c for c in candidates if c.svtype == "SOFTCLIP"]
+    splits = [c for c in candidates if c.svtype == "SPLIT"]
 
     # Region query: around the first DEL in the TSV
     if dels:
@@ -134,12 +203,14 @@ def test_interval_tree():
     
     # Test overlapping candidates with window
     print("\n--- Testing overlapping candidates with window ---")
-    test_candidate = candidates[0]  # chr21:1000-1050 DEL
-    overlapping = structurer.get_overlapping_candidates(test_candidate, window=10)
+    test_candidate = candidates[0]
+    overlapping = structurer.get_overlapping_candidates(test_candidate, window=100)
     print(f"Candidates overlapping with {test_candidate.chrom}:{test_candidate.pos}-{test_candidate.end} "
-          f"{test_candidate.svtype} (window=10): {len(overlapping)}")
-    for c in overlapping:
+          f"{test_candidate.svtype} (window=100): {len(overlapping)}")
+    for c in overlapping[:5]:
         print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype} (read={c.read})")
+    if len(overlapping) > 5:
+        print(f"  ... {len(overlapping)-5} more")
     
     # Test tree visualization
     print("\n--- Tree visualization ---")
@@ -147,65 +218,47 @@ def test_interval_tree():
         print(structurer.get_tree_visualization(dels[0].chrom, "DEL"))
     elif ins:
         print(structurer.get_tree_visualization(ins[0].chrom, "INS"))
+    elif softclips:
+        print(structurer.get_tree_visualization(softclips[0].chrom, "SOFTCLIP"))
+    elif splits:
+        print(structurer.get_tree_visualization(splits[0].chrom, "SPLIT"))
     else:
         print("No candidates to visualize.")
     
     print("\nTest completed!")
 
 
-def convert_chr21_to_clustered(in_path: str, out_path: str) -> None:
-    """Convert chr21_SVs.txt (chr,start,end,svtype,svlen) to clustered format.
 
-    Output columns: chrom,start,end,type,support,median_sv_len,reads,genes
-    - chrom: strip 'chr' prefix if present (e.g., 'chr21' -> '21')
-    - type: from svtype
-    - support: default 1 (one row per input SV)
-    - median_sv_len: abs(svlen) or 1 if missing/NA
-    - reads: empty
-    - genes: empty
-    Rows with missing start/end are skipped.
-    """
-    df = pd.read_csv(in_path, sep="\t")
-    required = ["chr", "start", "end", "svtype", "svlen"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Input is missing required columns: {missing}")
 
-    def strip_chr(x: str) -> str:
-        s = str(x)
-        return s[3:] if s.startswith("chr") else s
 
-    out = pd.DataFrame()
-    out["chrom"] = df["chr"].map(strip_chr)
-    # Drop rows with NA start/end
-    valid = df["start"].notna() & df["end"].notna()
-    df = df[valid].copy()
-    out = out.loc[valid].copy()
 
-    out["start"] = df["start"].astype(int)
-    out["end"] = df["end"].astype(int)
-    out["type"] = df["svtype"].astype(str)
-    # Default support 1
-    out["support"] = 1
-    # median_sv_len: abs of svlen; coerce errors -> NaN then fill with 1
-    svlen = pd.to_numeric(df["svlen"], errors="coerce").abs().fillna(1).astype(int)
-    out["median_sv_len"] = svlen
-    out["reads"] = ""
-    out["genes"] = ""
-
-    out.to_csv(out_path, sep="\t", index=False)
-    print(f"Wrote converted clustered TSV: {out_path} (rows={len(out)})")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Interval tree tester and chr21 converter")
-    parser.add_argument("--convert", action="store_true", help="Convert chr21_SVs.txt to clustered format")
+    parser = argparse.ArgumentParser(
+        description="IsoSV Interval Tree Tester - Tests interval trees with per-read SV candidates",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Test with per-read TSV format
+  python test_intervals.py --input my_svs.tsv
+  
+  # Test with custom window size
+  python test_intervals.py --input my_svs.tsv --window 200
+        """
+    )
+    
+    parser.add_argument("--input", "-i", type=str, required=True,
+                       help="Input TSV file with per-read SV candidates")
+    parser.add_argument("--window", "-w", type=int, default=100,
+                       help="Window size for overlap testing (default: 100)")
+    
     args = parser.parse_args()
 
-    if args.convert:
-        project_root = os.path.dirname(os.path.dirname(__file__))
-        in_path = os.path.join(project_root, "test_data", "chr21_SVs.txt")
-        out_path = os.path.join(project_root, "test_data", "chr21_SVs_converted.tsv")
-        convert_chr21_to_clustered(in_path, out_path)
+    print(f"Loading per-read candidates from: {args.input}")
+    candidates = load_per_read_candidates(args.input)
+    if candidates:
+        test_interval_tree_with_candidates(candidates)
     else:
-        test_interval_tree()
+        print("Failed to load candidates. Exiting.")
+        sys.exit(1)
