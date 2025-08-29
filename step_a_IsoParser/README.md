@@ -140,12 +140,12 @@ Column meanings:
 - **IS_PROPER_PAIR** — `1` if `is_proper_pair` is true (flag 0x2), `0` otherwise.
 - **ORIENTATION** — strand orientation of read and mate in `READ/MATE` form using `F` (forward) and `R` (reverse)`. See the orientation mapping below.
   Below is the shorthand → TSV mapping we use:
-  - +    = forward strand → F
-  - -    = reverse strand → R
-  - +/-  = read on forward, mate on reverse → F/R
-  - -/+  = read on reverse, mate on forward → R/F
-  - +/+  = both forward → F/F
-  - -/-  = both reverse → R/R
+  - `+`    = forward strand → `F`
+  - `-`    = reverse strand → `R`
+  - `+/-`  = read on forward, mate on reverse → `F/R`
+  - `-/+`  = read on reverse, mate on forward → `R/F`
+  - `+/+`  = both forward → `F/F`
+  - `-/-`  = both reverse → `R/R`
 - **SEQ** — read sequence (query sequence) if available, or `.` when missing.
 
 
