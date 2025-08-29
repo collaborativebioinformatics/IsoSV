@@ -6,6 +6,12 @@ This step takes clustered structural variant (SV) candidates and annotates them 
 
 The goal is to classify each SV based on its relationship to known genes and exons. The pipeline identifies events such as gene fusions, exonic deletions, and distinguishes them from normal splicing. It uses a pre-computed IntervalTree for high-performance annotation lookups.
 
+## Requirements
+
+pandas v2.3.2+
+intervaltree v3.1.0+
+python3
+
 ## Workflow
 
 The process is divided into two main stages: a one-time pre-computation and the main annotation script.
@@ -41,6 +47,22 @@ python scripts/annotate_svs.py \
     --tree resources/tx_tree_cache.pkl \
     --output results/annotated_regions.csv
 ```
+
+(Please check which version works! )
+
+```bash
+usage: annotate.py [-h] --candidates CANDIDATES --cache CACHE -o OUTDIR
+
+Annotate SV candidates using prebuilt transcript trees.
+
+options:
+  -h, --help                    show this help message and exit
+  --candidates CANDIDATES       Path to SV candidates
+  --cache CACHE                 Transcript tree file path
+  -o OUTDIR, --outdir OUTDIR    Output directory for annotated VCF
+```
+
+Output VCF is named `sv_candidates.annotated.vcf` under the output directory of choice. 
 
 ## File Descriptions
 
