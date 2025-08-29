@@ -53,7 +53,8 @@ Step 3: IsoAnnotator - overlays SVs with transcript annotations, classifying the
 
 The IsoSV workflow for structural variant analysis was designed to identify and evaluate candidate variants from RNA sequencing data. The process begins with parsing BAM files from RNASeq data (Long Read and Short Read), where input BAM alignments are filtered based on mapping quality (XXXX), and candidate variants larger than 30-50 bp are extracted. These candidates are exported into text or VCF files. Next, a data structure for genomic intervals is used to cluster similar candidate entries, generating consolidated variant calls in text or VCF format. To enrich for biological relevance, candidate regions are prioritized using external known annotation resources such as BED or GFF files are incorporated to annotate candidates, producing an updated VCF with annotated structural variants. For visualization, the resulting VCF files are inspected in IGV. Finally, benchmark datasets (HG002) are used for evaluation as a truthset using bedtools and RNASeq coverage profiles to validate expression of the candidate events. To benchmark performance, we constructed a GIAB truth set of large indels by combining two sources: (i) structural variant calls annotated with SVTYPE and SVLEN, and (ii) indel calls derived from reference/alternative allele length differences (≥30 bp). Each variant was represented as a ±10 bp window in BED format. Overlap between Clair3-RNA candidate large indels and GIAB truth sets was assessed using bedtools intersect. Validation was defined as any overlap between candidate and GIAB indels within this positional tolerance.
 
-<img width="928" height="744" alt="IsoSV-Workflow-Final" src="https://github.com/user-attachments/assets/04bdb1ea-2a57-4e75-abb3-538dbf6fdc98" />
+<img width="861" height="678" alt="IsoSV-final" src="https://github.com/user-attachments/assets/0e26a01c-338b-41c3-9c82-ddbc0b6ffa12" />
+
 
 ## Presentation
 
