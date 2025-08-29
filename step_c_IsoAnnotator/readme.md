@@ -34,37 +34,22 @@ N.B.: These files are now placed under `resources/` for easy reference.
 
 **2. Run Annotation**
 
-Once the cache is built, run the main annotation script either to generate a csv file or vcf files as below
+Once the cache is built, run the main annotation script.
 
 ```bash
 # Usage:
-python scripts/annotate_svs.py \
-    --input <path_to_sv_candidates.tsv> \
-    --tree resources/tx_tree_cache.pkl \
-    --output results/annotated_regions.csv
+python scripts/annotate.py \
+    --candidates <path_to_sv_candidates.tsv> \
+    --cache resources/tx_tree_cache.pkl \
+    -o <output_directory>
 
 # Example with mock data from Step B:
-python scripts/annotate_svs.py \
-    --input ../step_b_IsoClustering/test_data/chr21_SVs_converted.tsv \
-    --tree resources/tx_tree_cache.pkl \
-    --output results/annotated_regions.csv
+python scripts/annotate.py \
+    --candidates ../step_b_IsoClustering/test_data/results/GIAB002_chr22_region_LongReadSVs_merged_SVs.tsv \
+    --cache resources/tx_tree_cache.pkl \
+    -o results/
 ```
-
-(Please check which version works!. It seems to work )
-
-```bash
-usage: annotate.py [-h] --candidates CANDIDATES --cache CACHE -o OUTDIR
-
-Annotate SV candidates using prebuilt transcript trees.
-
-options:
-  -h, --help                    show this help message and exit
-  --candidates CANDIDATES       Path to SV candidates
-  --cache CACHE                 Transcript tree file path
-  -o OUTDIR, --outdir OUTDIR    Output directory for annotated VCF
-```
-
-Output VCF is named `sv_candidates.annotated.vcf` under the output directory of choice.
+The script will generate an annotated VCF file named `GIAB002_chr22_region_LongReadSV.annotated.vcf` inside the specified output directory.
 
 ## File Descriptions
 
@@ -74,15 +59,21 @@ Output VCF is named `sv_candidates.annotated.vcf` under the output directory of 
 
 ## Annotation Output
 
-The main output of this step is `results/annotated_regions.csv`. This file contains the original SV candidate information from Step B, plus two additional columns: `Annotation` and `Gene(s)`.
+The main output is an annotated VCF file. The `INFO` column of the VCF contains our functional annotations.
 
-The `Annotation` column can have one of the following values:
+-   **`SVTYPE`**: This standard field retains the original structural variant type (`DEL` or `INS`).
+-   **`ANN_TYPE`**: This is a custom field that provides the detailed functional classification.
 
-- **`Gene_Fusion`**: The SV's coordinates overlap with two or more distinct genes, suggesting a large-scale rearrangement.
-  - 1. Large deletions spanning >1 genes
-  - 2. INS of known gene regions (might need de novo assembly from RNAseq data? SR should be pretty noisy for this ...)
-- **`Exonic_Deletion`**: The SV occurs within a single gene and completely contains at least one of its exons.
-- **`Canonical_Splicing`**: The SV's coordinates precisely match the boundaries of a known intron (the region between two consecutive exons). This represents a standard splicing event.
-- **`Intronic/Novel_Splicing`**: An SV that occurs within a single gene but does not fit the criteria for `Exonic_Deletion` or `Canonical_Splicing`. This indicates a potential genomic deletion within an intron or a non-standard splicing event.
-- **`Intergenic`**: The SV does not overlap with any known gene.
-  - Probably not something we want to prioritize?
+The possible values for `ANN_TYPE` depend on the original `SVTYPE`:
+
+#### For Deletions (`SVTYPE=DEL`):
+-   **`Gene_Fusion`**: The deletion's coordinates overlap with two or more distinct genes.
+-   **`Exonic_Deletion`**: The deletion occurs within a single gene and completely contains at least one of its exons.
+-   **`Canonical_Splicing`**: The deletion's coordinates precisely match the boundaries of a known intron.
+-   **`Intronic/Novel_Splicing`**: The deletion occurs within a single gene but does not fit the criteria above.
+-   **`Intergenic`**: The deletion does not overlap with any known gene.
+
+#### For Insertions (`SVTYPE=INS`):
+-   **`Insertion_in_Fusion_Region`**: The insertion point falls in a complex region with overlapping annotations for two or more genes.
+-   **`Intragenic_Insertion`**: The insertion point falls within the boundaries of a single gene.
+-   **`Intergenic`**: The insertion point does not overlap with any known gene.
