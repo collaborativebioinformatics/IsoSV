@@ -38,9 +38,11 @@ RNA structural variants are any transcript-level rearrangements observed in RNA-
 IsoSV is implemented as a three-stage workflow:
 
 Step 1: IsoParser: Identifies candidate events by scanning BAM alignments for signatures of SVs encoded in CIGAR strings and supplementary alignment tags. It flags long insertions, deletions, skipped regions, and soft clips while recording read-level support.
-(https://github.com/collaborativebioinformatics/IsoSV/blob/main/step_a_IsoParser/README.md)
+[Running Step 1](https://github.com/collaborativebioinformatics/IsoSV/blob/main/step_a_IsoParser/README.md)
 
 Step 2: IsoClustering 
+
+Step 3: IsoAnnotator 
 
 
 
