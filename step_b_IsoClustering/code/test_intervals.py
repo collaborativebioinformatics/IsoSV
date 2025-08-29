@@ -351,7 +351,7 @@ def auto_detect_format_and_load(tsv_path: str):
         return []
 
 
-def test_interval_tree_with_candidates(candidates, window_size=100):
+def test_interval_tree_with_candidates(candidates, window_size=100, output_file=None, min_support=2):
     """Test the interval tree functionality with provided candidates."""
     if not candidates:
         print("No candidates to test!")
@@ -432,20 +432,20 @@ def test_interval_tree_with_candidates(candidates, window_size=100):
         print(f"  ... {len(overlapping)-5} more")
     
     # Test interval merging/clustering
-    print(f"\n--- Testing interval merging with window {window_size} ---")
-    merged_intervals = merge_overlapping_intervals(candidates, window_size)
+    print(f"\n--- Testing interval merging with window {window_size}, min support {min_support} ---")
+    merged_intervals = merge_overlapping_intervals(candidates, window_size, min_support)
     print(f"Original candidates: {len(candidates)}")
     print(f"Merged intervals: {len(merged_intervals)}")
     
     if len(merged_intervals) < len(candidates):
         print("Intervals were successfully merged!")
-        print("\nMerged intervals in TSV format:")
-        print("clusterid\tchrom\tstart\tend\ttype\tsupport\tmedian_sv_len\treads\tread_positions")
-        for i, merged in enumerate(merged_intervals[:10]):
-            # Extract reads and positions from merged candidates
+        print(f"\nMerged intervals: {len(merged_intervals)} clusters created")
+        
+        # Prepare output content
+        output_lines = ["clusterid\tchrom\tstart\tend\ttype\tsupport\tmedian_sv_len\tread_positions"]
+        for i, merged in enumerate(merged_intervals):
+            # Extract candidates and create read positions string
             merged_candidates = merged.flags.get('merged_candidates', [merged])
-            reads = [c.read for c in merged_candidates]
-            reads_str = ','.join(reads) if reads else merged.read
             
             # Create read positions string (chrom:start:end for each read)
             read_positions = []
@@ -458,9 +458,33 @@ def test_interval_tree_with_candidates(candidates, window_size=100):
             support = len(merged_candidates)
             
             # Format output as TSV
-            print(f"cluster_{i+1:03d}\t{merged.chrom}\t{merged.pos}\t{merged.end}\t{merged.svtype}\t{support}\t{merged.svlen}\t{reads_str}\t{read_positions_str}")
-        if len(merged_intervals) > 10:
-            print(f"... {len(merged_intervals)-10} more merged intervals")
+            output_line = f"cluster_{i+1:03d}\t{merged.chrom}\t{merged.pos}\t{merged.end}\t{merged.svtype}\t{support}\t{merged.svlen}\t{read_positions_str}"
+            output_lines.append(output_line)
+        
+        # Display first 10 lines in console
+        print("\nFirst 10 merged intervals:")
+        for line in output_lines[:11]:  # Header + first 10
+            print(line)
+        if len(output_lines) > 11:
+            print(f"... {len(output_lines)-11} more merged intervals")
+        
+        # Write to file if specified
+        if output_file:
+            try:
+                # Create directory if it doesn't exist
+                import os
+                output_dir = os.path.dirname(output_file)
+                if output_dir and not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                    print(f"Created directory: {output_dir}")
+                
+                with open(output_file, 'w') as f:
+                    for line in output_lines:
+                        f.write(line + '\n')
+                print(f"\nMerged intervals saved to: {output_file}")
+                print(f"   Total clusters written: {len(merged_intervals)}")
+            except Exception as e:
+                print(f"\nError writing to {output_file}: {e}")
     else:
         print("No intervals were merged. This might indicate:")
         print("   - All intervals are too far apart")
@@ -484,7 +508,7 @@ def test_interval_tree_with_candidates(candidates, window_size=100):
     print("\nTest completed!")
 
 
-def merge_overlapping_intervals(candidates, window_size):
+def merge_overlapping_intervals(candidates, window_size, min_support=2):
     """Merge overlapping intervals within the specified window size.
     
     This function implements a simple clustering approach to merge nearby intervals
@@ -526,14 +550,15 @@ def merge_overlapping_intervals(candidates, window_size):
                 current_group.append(candidate)
             else:
                 # Finalize current group and start new one
-                merged = merge_candidate_group(current_group)
-                merged_intervals.append(merged)
+                if len(current_group) >= min_support:
+                    merged = merge_candidate_group(current_group)
+                    merged_intervals.append(merged)
                 current_group = [candidate]
-        
-        # Don't forget the last group
-        if current_group:
-            merged = merge_candidate_group(current_group)
-            merged_intervals.append(merged)
+    
+    # Don't forget the last group
+    if current_group and len(current_group) >= min_support:
+        merged = merge_candidate_group(current_group)
+        merged_intervals.append(merged)
     
     return merged_intervals
 
@@ -608,6 +633,18 @@ Examples:
   
   # Force clustered format
   python test_intervals.py --input my_svs.tsv --format clustered
+  
+  # Save merged intervals to file
+  python test_intervals.py --input my_svs.tsv --output merged_clusters.tsv
+  
+  # Custom window size and output file
+  python test_intervals.py --input my_svs.tsv --window 500 --output my_clusters.tsv
+  
+  # With minimum support threshold
+  python test_intervals.py --input my_svs.tsv --min-support 3 --output clusters.tsv
+  
+  # Full custom configuration
+  python test_intervals.py --input my_svs.tsv --window 200 --min-support 5 --output high_quality_clusters.tsv
         """
     )
     
@@ -617,6 +654,10 @@ Examples:
                        help="TSV format to use (default: auto-detect)")
     parser.add_argument("--window", "-w", type=int, default=100,
                        help="Window size for overlap testing (default: 100)")
+    parser.add_argument("--min-support", "-s", type=int, default=2,
+                       help="Minimum support (reads) required for clustering (default: 2)")
+    parser.add_argument("--output", "-o", type=str, default=None,
+                       help="Output TSV file for merged intervals (default: print to console)")
     
     args = parser.parse_args()
 
@@ -630,7 +671,7 @@ Examples:
         candidates = load_clustered_summary_candidates(args.input)
     
     if candidates:
-        test_interval_tree_with_candidates(candidates, args.window)
+        test_interval_tree_with_candidates(candidates, args.window, args.output, args.min_support)
     else:
         print("Failed to load candidates. Exiting.")
         sys.exit(1)
