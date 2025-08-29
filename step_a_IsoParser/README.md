@@ -4,6 +4,8 @@
 - [Google Doc - Team 9](https://docs.google.com/document/d/1i5qklL01o8b1E8FYtd3IBWgXcedRDMfNrrp3aHU8AwE/edit?tab=t.0)
 - [SV Hackathon 2025](https://fritzsedlazeck.github.io/blog/2025/hackathon-2025/)
 
+- [GIAB002_chr22_region.bam](https://drive.google.com/drive/folders/1y48dxKJYkRXxDcEt6kTNbaEs6qCvUD8I?usp=drive_link)
+
 ---
 
 * `iso_parser.py` — the single main script. It performs robust parsing, per-read candidate extraction, optional clustering, and optional GTF annotation (if you supply a GTF).
@@ -67,11 +69,11 @@ Store that file somewhere accessible and pass `--gtf /path/to/gencode.v43.annota
 ## How to run (examples)
 
 
-**Minimal (write outputs next to `results.tsv`):**
+**Minimal (write outputs next to `demo_candidates.tsv`):**
 
 
 ```bash
-python iso_parser.py bamExample.bam results.tsv
+python iso_parser.py bamExample.bam demo_candidates.tsv
 ```
 
 
@@ -79,9 +81,8 @@ python iso_parser.py bamExample.bam results.tsv
 
 
 ```bash
-python iso_parser.py bamExample.bam results.tsv --out-dir results/
+python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/
 ```
-
 
 **Use low thresholds for quick debugging + cluster with support >=2:**
 
@@ -92,6 +93,10 @@ python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/ \
 --cluster-window 50 --min-support 2 --salvage
 ```
 
+**Report discordant paired-end events (mate-unmapped, not-proper, large insert):**
+```bash
+python iso_parser.py input.bam demo_candidates.tsv --report-discordant --out-dir results/
+```
 
 ## Outputs and column definitions
 
@@ -100,26 +105,47 @@ When the parser finishes it writes a per-read candidates TSV and several helper 
 
 
 ```
-chrom pos_start pos_end read_name sv_type sv_len note read_len cigar
+chrom	pos_start	pos_end	read_name	sv_type	sv_len	note	read_len	cigar	MAPQ	TLEN	MATE_UNMAPPED	IS_PROPER_PAIR	ORIENTATION	SEQ
 ```
 
 
 Column meanings:
 - **chrom** — reference sequence name (e.g. `1`, `chr1`, `21`, `X`) where the read aligned.
 - **pos_start** — 0-based reference coordinate where the event begins (for insertions this is the base *before* the inserted sequence; for deletions it is the first deleted base; for soft-clips it's the position on the reference adjacent to the clipped sequence).
+  - For `INS`: the base immediately before the inserted sequence (insertion occurs between bases), so pos_end == pos_start.
+  - For `DEL`: first deleted base (0-based).
+  - For `SOFTCLIP`: reference position adjacent to clipped bases (left/right/internal note further clarifies).
+  - For `LARGE_N`: start of the skipped region (N) on the reference.
+
 - **pos_end** — 0-based inclusive end coordinate of the event on the reference. For insertions this is equal to `pos_start` (the insertion occurs between bases). For events that span bases (deletions, LARGE_N), this is `pos_start + sv_len - 1`.
 - **read_name** — query/read identifier (QNAME) from the BAM (useful to inspect supporting reads manually in IGV or samtools).
 - **sv_type** — event type detected in the read. Typical values:
-- `INS` — insertion present in the read relative to the reference (CIGAR `I`)
-- `DEL` — deletion present in the read relative to the reference (CIGAR `D`)
-- `SOFTCLIP` — soft-clipped bases at the read ends (CIGAR `S`) — possible breakpoint
-- `LARGE_N` — very large `N` (skipped region) in the CIGAR (often large introns, reported only if `--large-N` threshold is set)
-- `SPLIT` — split / supplementary alignment indicated via `SA` tag
+  - `INS` — insertion present in the read relative to the reference (CIGAR `I`)
+  - `DEL` — deletion present in the read relative to the reference (CIGAR `D`)
+  - `SOFTCLIP` — soft-clipped bases at the read ends (CIGAR `S`) — possible breakpoint
+  - `LARGE_N` — very large `N` (skipped region) in the CIGAR (often large introns, reported only if `--large-N` threshold is set)
+  - `SPLIT` — split / supplementary alignment indicated via `SA` tag
+  - `MATE_UNMAPPED` — paired read mate is unmapped
+  - `DISC_PAIR` — discordant pair (not proper)
+  - `LARGE_INSERT` — abnormally large template length (TLEN)
+
 - **sv_len** — integer length of the event reported (number of inserted or deleted bases, soft-clip length, or skipped `N` length). For `SPLIT` this will be `0` and the `note` explains the cause.
 - **note** — short human-readable note describing why the read was reported (e.g. `CIGAR_I`, `CIGAR_D`, `CIGAR_S_left`, `SA_tag`, or `SALVAGED_CIGAR_I`). Salvaged detections (from reads that caused parse errors) are prefixed with `SALVAGED_`.
 - **read_len** — length of the read sequence (number of bases in the read). This helps to disambiguate short vs long reads and to assess reliability of soft-clip signals.
 - **cigar** — the exact CIGAR string for the alignment as present in the BAM (e.g. `12M1I23M`). This is written verbatim so you can reproduce the detection logic later.
-
+- **MAPQ** — mapping quality of the read (integer). A missing/unknown value is given as `.`.
+- **TLEN** — template length (TLEN/TLEN field from BAM). For paired-end reads this is the signed insert length; stored as absolute for reporting where relevant; missing/zero often shown as `.`.
+- **MATE_UNMAPPED** — `1` if mate is unmapped, `0` otherwise.
+- **IS_PROPER_PAIR** — `1` if `is_proper_pair` is true (flag 0x2), `0` otherwise.
+- **ORIENTATION** — strand orientation of read and mate in `READ/MATE` form using `F` (forward) and `R` (reverse)`. See the orientation mapping below.
+  Below is the shorthand → TSV mapping we use:
+  - `+`    = forward strand → `F`
+  - `-`    = reverse strand → `R`
+  - `+/-`  = read on forward, mate on reverse → `F/R`
+  - `-/+`  = read on reverse, mate on forward → `R/F`
+  - `+/+`  = both forward → `F/F`
+  - `-/-`  = both reverse → `R/R`
+- **SEQ** — read sequence (query sequence) if available, or `.` when missing.
 
 
 
@@ -148,4 +174,4 @@ samtools view bamExample.bam \
 
 ---
 
-> To test: `python iso_parser.py bamExample.bam demo_candidates.tsv --insert 1 --delete 1 --softclip 1 --sample-parse 2000`
+> To test: `python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results_bamExample/ --insert 1 --delete 1 --softclip 1 --sample-parse 2000 \ --cluster-window 50 --min-support 2 --salvage`

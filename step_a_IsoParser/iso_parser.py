@@ -2,28 +2,26 @@
 """
 iso_parser.py - parser + clustering + optional GTF annotation
 
-This updated version adds:
-- an `--out-dir` option so all outputs (candidates, clusters, logs) go into a single folder
-- a short automatic summary printed to stdout and saved as `<out_prefix>.summary.txt`
-  which contains per-type candidate counts and simple percentages
-- richer docstrings and in-line comments so team members can understand each function
+Updates in this version (high-level):
+- Added paired-end insert-size sampling helper and optional reporting of discordant pairs/mate-unmapped events.
+- Added `--out-dir` so all outputs go into a single folder.
+- Candidates TSV now includes read sequence (query sequence) as last column for easier downstream inspection.
+- Added reporting of discordant / large-insert / mate-unmapped candidate types when `--report-discordant` is set.
+- Produces a JSON + human-readable `<out_prefix>.summary.txt` containing counts by type.
 
-Features (unchanged):
-- Robust BAM classification + parsing (skips & logs corrupted records)
-- Per-read candidate extraction (INS/DEL/SOFTCLIP/LARGE_N/SPLIT)
-- Clustering of per-read candidates into region-level events
-- Optional GTF annotation of clusters (Gencode v43 compatible)
-
-Usage highlights (example):
+Usage example (short):
     python iso_parser.py input.bam results.tsv --out-dir results/ --insert 1 --delete 1 \
-        --softclip 1 --sample-parse 20000 --cluster-window 50 --min-support 2 --salvage
+        --softclip 1 --sample-parse 20000 --cluster-window 50 --min-support 2 --salvage --report-discordant
 
-Outputs (in the out-dir or next to `results.tsv` if --out-dir omitted):
+Outputs (in out-dir or next to results.tsv):
   results.tsv                    - per-read candidate TSV (tab-separated)
   results.tsv.errors.log         - parse/salvage errors
   results.clusters.tsv           - cluster-level TSV
-  results.clusters.txt           - cluster-level TXT (same content, tool-friendly ext.)
+  results.clusters.txt           - cluster-level TXT (same content)
   results.summary.txt            - short summary (counts by type + basic stats)
+
+Columns in candidates TSV:
+  chrom, pos_start, pos_end, read_name, sv_type, sv_len, note, read_len, cigar, MAPQ, TLEN, MATE_UNMAPPED, IS_PROPER_PAIR, ORIENTATION, SEQ
 
 """
 import pysam
@@ -36,8 +34,9 @@ import re
 import json
 from collections import defaultdict, Counter
 from bisect import bisect_left
+from math import sqrt
 
-# CIGAR op codes mapping used in logic
+# CIGAR op codes
 # 0=M,1=I,2=D,3=N,4=S,5=H,6=P,7==,8=X
 OP_CONSUME_REF = {0, 2, 3, 7, 8}
 
@@ -110,6 +109,48 @@ def infer_bam_type_by_readlen(bam_path, sample_reads=5000, readlen_cutoff=1000):
     return bam_type, median_len, mean_len, len(lengths), skipped
 
 
+def sample_insert_sizes(bam_path, sample_reads=5000):
+    """
+    Sample paired-end template lengths (TLEN) to get median/mean/std and count unmapped mates.
+    Returns (median, mean, std, n_sampled, n_unmapped_mates, n_skipped)
+    """
+    vals = []
+    skipped = 0
+    n_unmapped = 0
+    n_seen = 0
+    bam = pysam.AlignmentFile(bam_path, "rb")
+    it = bam.fetch(until_eof=True)
+    while len(vals) < sample_reads:
+        try:
+            r = next(it)
+        except StopIteration:
+            break
+        except Exception:
+            skipped += 1
+            n_seen += 1
+            continue
+        n_seen += 1
+        if not r.is_paired:
+            continue
+        tlen = getattr(r, 'template_length', None)
+        # skip 0 template lengths (often single-end or not set)
+        if not tlen:
+            # if mate unmapped, template_length may be 0
+            if r.mate_is_unmapped:
+                n_unmapped += 1
+            continue
+        vals.append(abs(int(tlen)))
+    bam.close()
+    if not vals:
+        return 0, 0.0, 0.0, 0, n_unmapped, skipped
+    med = int(statistics.median(vals))
+    mean = float(statistics.mean(vals))
+    # compute sample std
+    var = statistics.pvariance(vals) if len(vals) > 1 else 0.0
+    std = float(sqrt(var))
+    return med, mean, std, len(vals), n_unmapped, skipped
+
+
 def choose_thresholds(bam_type, short_defaults=(30, 30, 30), long_defaults=(200, 200, 200)):
     """
     Choose default size thresholds (INS, DEL, SOFTCLIP) based on inferred BAM type.
@@ -133,12 +174,21 @@ def _get_read_length(read):
     return int(qlen)
 
 
-def _write_candidate_line(fout, chrom, start, end, qname, sv_type, sv_len, note, read_len, cigar):
-    """Helper to write a tab-delimited candidate line to the open file handle."""
-    fout.write(f"{chrom}\t{start}\t{end}\t{qname}\t{sv_type}\t{sv_len}\t{note}\t{read_len}\t{cigar}\n")
+def _write_candidate_line(fout, chrom, start, end, qname, sv_type, sv_len, note,
+                          read_len, cigar, mapq=".", tlen=".", mate_unmapped=".", is_proper=".", orientation=".", seq=""):
+    """
+    Write a candidate line. We keep many fields as strings/placeholders so
+    this works for single-end / long-read BAMs as well (use '.' for missing).
+    Columns appended: MAPQ, TLEN, MATE_UNMAPPED, IS_PROPER_PAIR, ORIENTATION, SEQ
+    """
+    fout.write(
+        f"{chrom}\t{start}\t{end}\t{qname}\t{sv_type}\t{sv_len}\t{note}\t"
+        f"{read_len}\t{cigar}\t{mapq}\t{tlen}\t{mate_unmapped}\t{is_proper}\t{orientation}\t{seq}\n"
+    )
 
 
 # ---------------- GTF helpers ----------------
+
 
 def parse_gtf_exons(gtf_path):
     """
@@ -204,6 +254,7 @@ def gtf_find_genes_for_interval(exons_dict, chrom, qstart, qend):
 
 
 # ---------------- clustering helpers ----------------
+
 
 def cluster_candidates(candidates, cluster_window=50, min_support=1):
     """
@@ -273,10 +324,12 @@ def cluster_candidates(candidates, cluster_window=50, min_support=1):
 
 # ---------------- main parser (collect candidates then cluster) ----------------
 
+
 def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
                           mq_thresh=20, ins_thresh=30, del_thresh=30, sc_thresh=30,
                           large_N_thresh=None, sample_limit=None, salvage=False,
-                          cluster_window=None, min_support=1, gtf_exons=None, out_dir=None):
+                          cluster_window=None, min_support=1, gtf_exons=None, out_dir=None,
+                          report_discordant=False, insert_size_cutoff=None):
     """
     Parse BAM and extract per-read SV-like candidates. Optionally cluster them and annotate.
 
@@ -298,13 +351,24 @@ def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
     else:
         out_prefix = os.path.splitext(out_tsv)[0]
 
+    # if requested, pre-sample insert sizes to set a reasonable cutoff
+    if report_discordant and insert_size_cutoff is None:
+        med_i, mean_i, std_i, n_i, n_unmapped, n_skipped = sample_insert_sizes(bam_path, sample_reads=5000)
+        if n_i > 0:
+            # default cutoff: median + 3*std (but at least 1000 bp to avoid tiny thresholds)
+            insert_size_cutoff = max(1000, int(med_i + 3 * std_i))
+        else:
+            insert_size_cutoff = 1000
+        print(f"[INFO] Sampled insert sizes: n={n_i}, median={med_i}, mean={mean_i:.1f}, std={std_i:.1f}, chosen_cutoff={insert_size_cutoff}, unmapped_mates={n_unmapped}")
+
     bam = pysam.AlignmentFile(bam_path, "rb")
     fout = open(out_tsv, "w")
     fout.write(f"#BAM_CLASSIFICATION={final_type}\n")
     fout.write(f"#SAMPLED_MEDIAN_READLEN={median_len}\n")
     fout.write(f"#SAMPLED_MEAN_READLEN={mean_len:.1f}\n")
     fout.write(f"#THRESHOLDS_INS={ins_thresh}\tDEL={del_thresh}\tSOFTCLIP={sc_thresh}\tMQ={mq_thresh}\n")
-    fout.write("chrom\tpos_start\tpos_end\tread_name\tsv_type\tsv_len\tnote\tread_len\tcigar\n")
+    fout.write("chrom\tpos_start\tpos_end\tread_name\tsv_type\tsv_len\tnote\tread_len\tcigar\tMAPQ\tTLEN\tMATE_UNMAPPED\tIS_PROPER_PAIR\tORIENTATION\tSEQ\n")
+
 
     err_log = out_prefix + ".errors.log"
     elog = open(err_log, "a")
@@ -339,30 +403,91 @@ def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
 
             cigarstr = read.cigarstring or "."
             read_len = _get_read_length(read)
+
+            # inside parse loop, after obtaining `read` and `cigarstr` and read_len
+            mapq = read.mapping_quality if read.mapping_quality is not None else "."
+            # template_length for paired-end; use getattr to be safe
+            tlen = getattr(read, "template_length", None)
+            tlen = tlen if (tlen is not None and tlen != 0) else "."
+            mate_unmapped = getattr(read, "mate_is_unmapped", False)
+            mate_unmapped_flag = "1" if mate_unmapped else "0"
+            is_proper = getattr(read, "is_proper_pair", False)
+            is_proper_flag = "1" if is_proper else "0"
+            # orientation: read strand / mate strand (F forward, R reverse); None if mate info missing
+            mate_rev = getattr(read, "mate_is_reverse", None)
+            if mate_rev is None:
+                orientation = "."
+            else:
+                read_strand = "R" if read.is_reverse else "F"
+                mate_strand = "R" if mate_rev else "F"
+                orientation = f"{read_strand}/{mate_strand}"
+            # sequence (may be None)
+            seq = read.query_sequence or ""
+
             if read.cigartuples is None:
+                # still may want to report discordant/mate-unmapped
+                if report_discordant and read.is_paired:
+                    if read.mate_is_unmapped:
+                        _write_candidate_line(
+                            fout,
+                            chrom or ".",
+                            getattr(read, 'reference_start', 0) or 0,
+                            getattr(read, 'reference_end', 0) or 0,
+                            read.query_name,
+                            "MATE_UNMAPPED",
+                            0,
+                            "MATE_UNMAPPED",
+                            read_len,
+                            cigarstr,
+                            mapq=mapq,
+                            tlen=tlen,
+                            mate_unmapped=mate_unmapped_flag,
+                            is_proper=is_proper_flag,
+                            orientation=orientation,
+                            seq=seq
+                        )
+                        candidates.append({'chrom': chrom or ".", 'start': getattr(read,'reference_start',0) or 0, 'end': getattr(read,'reference_end',0) or 0, 'read_name': read.query_name, 'sv_type': 'MATE_UNMAPPED', 'sv_len': 0})
+                        counts['MATE_UNMAPPED'] += 1
                 continue
 
             ref_cursor = ref_pos
+
             for idx, (op, length) in enumerate(read.cigartuples):
                 # insertion in CIGAR: I
                 if op == 1 and length >= ins_thresh:
-                    _write_candidate_line(fout, chrom, ref_cursor, ref_cursor, read.query_name, "INS", length, "CIGAR_I", read_len, cigarstr)
+                    _write_candidate_line(
+                        fout, chrom, ref_cursor, ref_cursor, read.query_name, "INS", length, "CIGAR_I",
+                        read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                        is_proper=is_proper_flag, orientation=orientation, seq=seq
+                    )
                     candidates.append({'chrom': chrom, 'start': ref_cursor, 'end': ref_cursor, 'read_name': read.query_name, 'sv_type': 'INS', 'sv_len': length})
                     counts['INS'] += 1
                 # deletion on reference: D
                 if op == 2 and length >= del_thresh:
-                    _write_candidate_line(fout, chrom, ref_cursor, ref_cursor + length - 1, read.query_name, "DEL", length, "CIGAR_D", read_len, cigarstr)
+                    _write_candidate_line(
+                        fout, chrom, ref_cursor, ref_cursor + length - 1, read.query_name, "DEL", length, "CIGAR_D",
+                        read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                        is_proper=is_proper_flag, orientation=orientation, seq=seq
+                    )
                     candidates.append({'chrom': chrom, 'start': ref_cursor, 'end': ref_cursor + length - 1, 'read_name': read.query_name, 'sv_type': 'DEL', 'sv_len': length})
                     counts['DEL'] += 1
                 # soft-clip: S
                 if op == 4 and length >= sc_thresh:
                     note = "CIGAR_S_left" if idx == 0 else ("CIGAR_S_right" if idx == len(read.cigartuples) - 1 else "CIGAR_S_internal")
-                    _write_candidate_line(fout, chrom, ref_cursor, ref_cursor, read.query_name, "SOFTCLIP", length, note, read_len, cigarstr)
+                    _write_candidate_line(
+                        fout, chrom, ref_cursor, ref_cursor, read.query_name, "SOFTCLIP", length, note,
+                        read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                        is_proper=is_proper_flag, orientation=orientation, seq=seq
+                    )
                     candidates.append({'chrom': chrom, 'start': ref_cursor, 'end': ref_cursor, 'read_name': read.query_name, 'sv_type': 'SOFTCLIP', 'sv_len': length})
                     counts['SOFTCLIP'] += 1
                 # N (skipped region / intron in RNA-seq); optional large_N_thresh
                 if op == 3 and large_N_thresh and length >= large_N_thresh:
-                    _write_candidate_line(fout, chrom, ref_cursor, ref_cursor + length - 1, read.query_name, "LARGE_N", length, "CIGAR_N", read_len, cigarstr)
+                    _write_candidate_line(
+                        fout, chrom, ref_cursor, ref_cursor + length - 1, read.query_name, "LARGE_N", length, "CIGAR_N",
+                        read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                        is_proper=is_proper_flag, orientation=orientation, seq=seq
+                    )
                     candidates.append({'chrom': chrom, 'start': ref_cursor, 'end': ref_cursor + length - 1, 'read_name': read.query_name, 'sv_type': 'LARGE_N', 'sv_len': length})
                     counts['LARGE_N'] += 1
                 if op in OP_CONSUME_REF:
@@ -370,9 +495,49 @@ def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
 
             # SA tag (supplementary/split alignment) - treat as split-support
             if sa is not None:
-                _write_candidate_line(fout, chrom, read.reference_start, read.reference_end, read.query_name, "SPLIT", 0, "SA_tag", read_len, cigarstr)
+                _write_candidate_line(
+                    fout, chrom, read.reference_start, read.reference_end, read.query_name, "SPLIT", 0, "SA_tag",
+                    read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                    is_proper=is_proper_flag, orientation=orientation, seq=seq
+                )
                 candidates.append({'chrom': chrom, 'start': read.reference_start, 'end': read.reference_end, 'read_name': read.query_name, 'sv_type': 'SPLIT', 'sv_len': 0})
                 counts['SPLIT'] += 1
+
+            # paired-end discordant checks (optional)
+            if report_discordant and getattr(read, 'is_paired', False):
+                try:
+                    tlen_local = getattr(read, 'template_length', 0) or 0
+                    if read.mate_is_unmapped:
+                        _write_candidate_line(
+                            fout, chrom or ".", read.reference_start, read.reference_end or read.reference_start,
+                            read.query_name, "MATE_UNMAPPED", 0, "MATE_UNMAPPED",
+                            read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                            is_proper=is_proper_flag, orientation=orientation, seq=seq
+                        )
+                        candidates.append({'chrom': chrom or ".", 'start': read.reference_start, 'end': read.reference_end or read.reference_start, 'read_name': read.query_name, 'sv_type': 'MATE_UNMAPPED', 'sv_len': 0})
+                        counts['MATE_UNMAPPED'] += 1
+                    else:
+                        # not proper pair -> discordant
+                        if not getattr(read, 'is_proper_pair', False):
+                            abs_t = abs(int(tlen_local))
+                            _write_candidate_line(
+                                fout, chrom, read.reference_start, read.reference_end or read.reference_start, read.query_name, "DISC_PAIR", abs_t, "NOT_PROPER_PAIR",
+                                read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                                is_proper=is_proper_flag, orientation=orientation, seq=seq
+                            )
+                            candidates.append({'chrom': chrom, 'start': read.reference_start, 'end': read.reference_end or read.reference_start, 'read_name': read.query_name, 'sv_type': 'DISC_PAIR', 'sv_len': abs_t})
+                            counts['DISC_PAIR'] += 1
+                        # very large insert size
+                        if insert_size_cutoff and abs(int(tlen_local)) >= insert_size_cutoff:
+                            _write_candidate_line(
+                                fout, chrom, read.reference_start, read.reference_end or read.reference_start, read.query_name, "LARGE_INSERT", abs(int(tlen_local)), "LARGE_INSERT_TLEN",
+                                read_len, cigarstr, mapq=mapq, tlen=tlen, mate_unmapped=mate_unmapped_flag,
+                                is_proper=is_proper_flag, orientation=orientation, seq=seq
+                            )
+                            candidates.append({'chrom': chrom, 'start': read.reference_start, 'end': read.reference_end or read.reference_start, 'read_name': read.query_name, 'sv_type': 'LARGE_INSERT', 'sv_len': abs(int(tlen_local))})
+                            counts['LARGE_INSERT'] += 1
+                except Exception as e_pair:
+                    elog.write(f"{getattr(read,'query_name','UNKNOWN')}\tpair_check_error\t{str(e_pair)}\n")
 
         except Exception as e:
             skipped += 1
@@ -391,17 +556,27 @@ def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
                         ref_cursor = getattr(read, 'reference_start', 0) or 0
                         cigarstr = getattr(read, 'cigarstring', None) or "."
                         read_len = _get_read_length(read)
+                        seq = getattr(read, 'query_sequence', None) or "."
                         for (op, length) in getattr(read, 'cigartuples', []):
                             if op == 1 and length >= ins_thresh:
-                                _write_candidate_line(fout, chrom or ".", ref_cursor, ref_cursor, qn, "INS", length, "SALVAGED_CIGAR_I", read_len, cigarstr)
+                                _write_candidate_line(
+                                    fout, chrom or ".", ref_cursor, ref_cursor, qn, "INS", length, "SALVAGED_CIGAR_I",
+                                    read_len, cigarstr, mapq=".", tlen=".", mate_unmapped=".", is_proper=".", orientation=".", seq=seq
+                                )
                                 candidates.append({'chrom': chrom or ".", 'start': ref_cursor, 'end': ref_cursor, 'read_name': qn, 'sv_type': 'INS', 'sv_len': length})
                                 counts['INS'] += 1
                             if op == 2 and length >= del_thresh:
-                                _write_candidate_line(fout, chrom or ".", ref_cursor, ref_cursor + length - 1, qn, "DEL", length, "SALVAGED_CIGAR_D", read_len, cigarstr)
+                                _write_candidate_line(
+                                    fout, chrom or ".", ref_cursor, ref_cursor + length - 1, qn, "DEL", length, "SALVAGED_CIGAR_D",
+                                    read_len, cigarstr, mapq=".", tlen=".", mate_unmapped=".", is_proper=".", orientation=".", seq=seq
+                                )
                                 candidates.append({'chrom': chrom or ".", 'start': ref_cursor, 'end': ref_cursor + length - 1, 'read_name': qn, 'sv_type': 'DEL', 'sv_len': length})
                                 counts['DEL'] += 1
                             if op == 4 and length >= sc_thresh:
-                                _write_candidate_line(fout, chrom or ".", ref_cursor, ref_cursor, qn, "SOFTCLIP", length, "SALVAGED_CIGAR_S", read_len, cigarstr)
+                                _write_candidate_line(
+                                    fout, chrom or ".", ref_cursor, ref_cursor, qn, "SOFTCLIP", length, "SALVAGED_CIGAR_S",
+                                    read_len, cigarstr, mapq=".", tlen=".", mate_unmapped=".", is_proper=".", orientation=".", seq=seq
+                                )
                                 candidates.append({'chrom': chrom or ".", 'start': ref_cursor, 'end': ref_cursor, 'read_name': qn, 'sv_type': 'SOFTCLIP', 'sv_len': length})
                                 counts['SOFTCLIP'] += 1
                             if op in OP_CONSUME_REF:
@@ -414,7 +589,7 @@ def parse_bam_and_cluster(bam_path, out_tsv, final_type, median_len, mean_len,
     fout.write(f"#SUMMARY_total_examined={total_examined}\n")
     fout.write(f"#SUMMARY_total_candidates={len(candidates)}\n")
     fout.write(f"#SUMMARY_total_skipped={skipped}\n")
-    for k in ['INS', 'DEL', 'SOFTCLIP', 'LARGE_N', 'SPLIT']:
+    for k in ['INS', 'DEL', 'SOFTCLIP', 'LARGE_N', 'SPLIT', 'MATE_UNMAPPED', 'DISC_PAIR', 'LARGE_INSERT']:
         fout.write(f"#SUMMARY_{k}={counts.get(k,0)}\n")
 
     fout.close()
@@ -499,6 +674,8 @@ def main():
     p.add_argument("--cluster-window", type=int, default=None, help="bp window to cluster per-read candidates (e.g. 50)")
     p.add_argument("--min-support", type=int, default=1, help="min distinct supporting reads for a cluster to be kept")
     p.add_argument("--gtf", type=str, default=None, help="optional GTF (Gencode v43) to annotate clusters (can be .gz)")
+    p.add_argument("--report-discordant", action="store_true", help="report discordant paired-end events (mate-unmapped, not-proper, large insert)")
+    p.add_argument("--insert-size-cutoff", type=int, default=None, help="optional threshold for large insert size (bp); if omitted we sample and use median+3*std or 1000bp min")
     args = p.parse_args()
 
     if not os.path.exists(args.bam):
@@ -544,7 +721,8 @@ def main():
                           mq_thresh=args.mq, ins_thresh=ins_thresh, del_thresh=del_thresh,
                           sc_thresh=sc_thresh, large_N_thresh=args.large_N, sample_limit=args.sample_parse,
                           salvage=args.salvage, cluster_window=args.cluster_window, min_support=args.min_support,
-                          gtf_exons=gtf_exons, out_dir=args.out_dir)
+                          gtf_exons=gtf_exons, out_dir=args.out_dir, report_discordant=args.report_discordant,
+                          insert_size_cutoff=args.insert_size_cutoff)
 
 
 if __name__ == "__main__":

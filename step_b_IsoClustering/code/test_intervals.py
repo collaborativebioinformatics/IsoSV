@@ -1,4 +1,8 @@
 """
+Created: 08.28.2025 
+Authors: Bigy Ambat, Memoona Rasheed
+Maintainer: Bigy Ambat
+
 Test script for the interval tree functionality using the intervaltree package.
 Supports the new per-read TSV format with detailed SV information.
 """
