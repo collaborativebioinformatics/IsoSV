@@ -441,8 +441,14 @@ def test_interval_tree_with_candidates(candidates, window_size=100, output_file=
         print("Intervals were successfully merged!")
         print(f"\nMerged intervals: {len(merged_intervals)} clusters created")
         
+        # Calculate total support across all clusters
+        total_support = sum(sum(c.flags.get('support', 1) for c in merged.flags.get('merged_candidates', [merged])) 
+                           for merged in merged_intervals)
+        print(f"Total support across all clusters: {total_support}")
+        print(f"Clustering strategy: Baseline read (highest support) exact coordinates")
+        
         # Prepare output content
-        output_lines = ["clusterid\tchrom\tstart\tend\ttype\tsupport\tmedian_sv_len\tread_positions"]
+        output_lines = ["clusterid\tchrom\tstart\tend\ttype\tsupport\tmedian_sv_len\tread_positions\tbaseline_read\tbaseline_support\twindow_expansion"]
         for i, merged in enumerate(merged_intervals):
             # Extract candidates and create read positions string
             merged_candidates = merged.flags.get('merged_candidates', [merged])
@@ -454,11 +460,14 @@ def test_interval_tree_with_candidates(candidates, window_size=100, output_file=
                 read_positions.append(pos_str)
             read_positions_str = ','.join(read_positions)
             
-            # Support is the count of merged reads
-            support = len(merged_candidates)
+            # Support is the sum of support values from all merged candidates
+            support = sum(c.flags.get('support', 1) for c in merged_candidates)
             
             # Format output as TSV
-            output_line = f"cluster_{i+1:03d}\t{merged.chrom}\t{merged.pos}\t{merged.end}\t{merged.svtype}\t{support}\t{merged.svlen}\t{read_positions_str}"
+            baseline_read = merged.flags.get('baseline_candidate', 'unknown')
+            baseline_support = merged.flags.get('baseline_support', 1)
+            window_expansion = merged.flags.get('window_expansion', 0)
+            output_line = f"cluster_{i+1:03d}\t{merged.chrom}\t{merged.pos}\t{merged.end}\t{merged.svtype}\t{support}\t{merged.svlen}\t{read_positions_str}\t{baseline_read}\t{baseline_support}\t{window_expansion}"
             output_lines.append(output_line)
         
         # Display first 10 lines in console
@@ -550,20 +559,23 @@ def merge_overlapping_intervals(candidates, window_size, min_support=2):
                 current_group.append(candidate)
             else:
                 # Finalize current group and start new one
-                if len(current_group) >= min_support:
-                    merged = merge_candidate_group(current_group)
+                current_support = sum(c.flags.get('support', 1) for c in current_group)
+                if current_support >= min_support:
+                    merged = merge_candidate_group(current_group, window_size)
                     merged_intervals.append(merged)
                 current_group = [candidate]
     
     # Don't forget the last group
-    if current_group and len(current_group) >= min_support:
-        merged = merge_candidate_group(current_group)
-        merged_intervals.append(merged)
+    if current_group:
+        current_support = sum(c.flags.get('support', 1) for c in current_group)
+        if current_support >= min_support:
+            merged = merge_candidate_group(current_group, window_size)
+            merged_intervals.append(merged)
     
     return merged_intervals
 
 
-def merge_candidate_group(candidates):
+def merge_candidate_group(candidates, window_size):
     """Merge a group of candidates into a single representative candidate."""
     if not candidates:
         return None
@@ -574,16 +586,24 @@ def merge_candidate_group(candidates):
         candidate.flags['merged_count'] = 1
         candidate.flags['merged_from'] = [candidate.read]
         candidate.flags['merged_candidates'] = [candidate]
+        candidate.flags['baseline_candidate'] = candidate.read
+        candidate.flags['baseline_support'] = candidate.flags.get('support', 1)
+        candidate.flags['baseline_pos'] = candidate.pos
+        candidate.flags['baseline_end'] = candidate.end
+        candidate.flags['window_expansion'] = 0  # No expansion for single reads
         return candidate
     
-    # Calculate merged coordinates (median for robustness)
-    positions = [c.pos for c in candidates]
-    ends = [c.end for c in candidates]
-    svlens = [c.svlen for c in candidates]
+    # Find the candidate with the highest individual support as baseline
+    baseline_candidate = max(candidates, key=lambda c: c.flags.get('support', 1))
+    baseline_support = baseline_candidate.flags.get('support', 1)
     
-    merged_pos = int(sum(positions) / len(positions))  # Average position
-    merged_end = int(sum(ends) / len(ends))            # Average end
-    merged_svlen = int(sum(svlens) / len(svlens))      # Average length
+    # Use exact coordinates of the baseline candidate (highest support)
+    merged_pos = baseline_candidate.pos
+    merged_end = baseline_candidate.end
+    
+    # Calculate average SV length from all candidates
+    svlens = [c.svlen for c in candidates]
+    merged_svlen = int(sum(svlens) / len(svlens)) if svlens else 0
     
     # Use the first candidate as template
     merged = Candidate(
@@ -601,8 +621,11 @@ def merge_candidate_group(candidates):
             'merged_count': len(candidates),
             'merged_from': [c.read for c in candidates],
             'merged_candidates': candidates,
-            'original_positions': positions,
-            'original_ends': ends,
+            'baseline_candidate': baseline_candidate.read,
+            'baseline_support': baseline_support,
+            'baseline_pos': baseline_candidate.pos,
+            'baseline_end': baseline_candidate.end,
+            'window_expansion': 0,  # No expansion, using exact coordinates
             'format': 'merged'
         }
     )
@@ -623,28 +646,28 @@ if __name__ == "__main__":
         epilog="""
 Examples:
   # Test with auto-detected format (recommended)
-  python test_intervals.py --input my_svs.tsv
+  python main.py --input my_svs.tsv
   
   # Test with custom window size
-  python test_intervals.py --input my_svs.tsv --window 200
+  python main.py --input my_svs.tsv --window 200
   
   # Force per-read format
-  python test_intervals.py --input my_svs.tsv --format per-read
+  python main.py --input my_svs.tsv --format per-read
   
   # Force clustered format
-  python test_intervals.py --input my_svs.tsv --format clustered
+  python main.py --input my_svs.tsv --format clustered
   
   # Save merged intervals to file
-  python test_intervals.py --input my_svs.tsv --output merged_clusters.tsv
+  python main.py --input my_svs.tsv --output merged_clusters.tsv
   
   # Custom window size and output file
-  python test_intervals.py --input my_svs.tsv --window 500 --output my_clusters.tsv
+  python main.py --input my_svs.tsv --window 500 --output my_clusters.tsv
   
   # With minimum support threshold
-  python test_intervals.py --input my_svs.tsv --min-support 3 --output clusters.tsv
+  python main.py --input my_svs.tsv --min-support 3 --output clusters.tsv
   
   # Full custom configuration
-  python test_intervals.py --input my_svs.tsv --window 200 --min-support 5 --output high_quality_clusters.tsv
+  python main.py --input my_svs.tsv --window 200 --min-support 5 --output high_quality_clusters.tsv
         """
     )
     
