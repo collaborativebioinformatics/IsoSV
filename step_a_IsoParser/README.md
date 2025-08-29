@@ -20,10 +20,11 @@
 
 ---
 
-## Short Read:
-* `sr_isoSV_parser.py` — short-read focused parser
-## Long Read:
-* `lr_isoSV_parser.py`  - 
+
+## Short read RNASeq bam parser
+* `sr_isoSV_parser.py` — It performs robust parsing, per-read candidate extraction, optional clustering, and optional GTF annotation (if you supply a GTF).
+## Long read RNASeq bam parser
+* `lr_isoSV_parser.py` — It parses long read RNASeq bam to detect SV signals using CIGAR (I/D), end soft-clips, and SA-tag splits, clusters breakpoints, and annotates with gene names  if gene.bed is provided.
 
 ### Output:
   - `<prefix>.indels.tsv`
