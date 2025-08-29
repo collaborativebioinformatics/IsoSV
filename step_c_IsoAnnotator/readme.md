@@ -34,7 +34,7 @@ N.B.: These files are now placed under `resources/` for easy reference.
 
 **2. Run Annotation**
 
-Once the cache is built, run the main annotation script.
+Once the cache is built, run the main annotation script either to generate a csv file or vcf files as below
 
 ```bash
 # Usage:

@@ -13,14 +13,14 @@ import argparse
 import pandas as pd
 from intervaltree import Interval, IntervalTree
 
-cache = "../resources/tx_tree_cache.pkl"
+cache = "/data/bnf/dev/saile/other/prj/hacathon_RNASV/resources/tx_tree_cache.pkl"
 test_data = "../../step_b_IsoClustering/test_data/chr21_SVs_converted.tsv"
 
 def load_tx_tree(filepath):
     """Load the IntervalTree from disk"""
     import pickle
     if not os.path.exists(filepath):
-        raise FileNotFoundError("Transcript tree not found! ")
+raise FileNotFoundError("Transcript tree not found! ")
     with open(filepath, 'rb') as f:
         return pickle.load(f)
 
@@ -114,6 +114,7 @@ def main():
     parser.add_argument("--cache", required=True, help="Transcript tree file path")
     parser.add_argument("-o", "--outdir", required=True, help="Output directory for annotated VCF")
     args = parser.parse_args()
+    
     
     tx_tree = load_tx_tree(args.cache)
 
