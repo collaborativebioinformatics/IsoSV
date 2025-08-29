@@ -48,30 +48,52 @@ def load_per_read_candidates(tsv_path: str):
     Expected columns:
     chrom, pos_start, pos_end, read_name, sv_type, sv_len, note, read_len, 
     cigar, MAPQ, TLEN, MATE_UNMAPPED, IS_PROPER_PAIR, ORIENTATION, SEQ
+    
+    Handles comment lines starting with # and skips them.
     """
     try:
-        df = pd.read_csv(tsv_path, sep='\t')
-        print(f"Loaded TSV with {len(df)} rows and columns: {list(df.columns)}")
+        # Read the file and skip comment lines
+        with open(tsv_path, 'r') as f:
+            lines = f.readlines()
+        
+        # Filter out comment lines and empty lines
+        data_lines = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
+        
+        if not data_lines:
+            print("No data lines found after filtering comments")
+            return []
+        
+        # Parse the header (first non-comment line)
+        header = data_lines[0].split('\t')
+        print(f"Found header with {len(header)} columns: {header}")
         
         # Check for required columns
         required_cols = ['chrom', 'pos_start', 'pos_end', 'read_name', 'sv_type']
-        missing_cols = [col for col in required_cols if col not in df.columns]
+        missing_cols = [col for col in required_cols if col not in header]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
         
+        # Create column index mapping
+        col_indices = {col: header.index(col) for col in header}
+        
         candidates = []
-        for i, row in df.iterrows():
+        for i, line in enumerate(data_lines[1:], 1):  # Skip header, start from line 1
             try:
+                parts = line.split('\t')
+                if len(parts) != len(header):
+                    print(f"Warning: Line {i+1} has {len(parts)} parts, expected {len(header)}. Skipping.")
+                    continue
+                
                 # Parse chromosome
-                chrom = _add_chr_prefix(row['chrom'])
+                chrom = _add_chr_prefix(parts[col_indices['chrom']])
                 
                 # Parse positions
-                pos_start = int(row['pos_start'])
-                pos_end = int(row['pos_end'])
+                pos_start = int(parts[col_indices['pos_start']])
+                pos_end = int(parts[col_indices['pos_end']])
                 
                 # Parse SV type and length
-                sv_type = str(row['sv_type']).upper()
-                sv_len = int(abs(row['sv_len'])) if pd.notna(row['sv_len']) else 0
+                sv_type = str(parts[col_indices['sv_type']]).upper()
+                sv_len = int(abs(int(parts[col_indices['sv_len']]))) if parts[col_indices['sv_len']] != '.' else 0
                 
                 # Handle special cases for different SV types
                 if sv_type == 'INS':
@@ -82,30 +104,31 @@ def load_per_read_candidates(tsv_path: str):
                         pos_end = pos_start + 1  # Minimum span
                 
                 # Parse read information
-                read_name = str(row['read_name']) if pd.notna(row['read_name']) else f"read_{i+1}"
-                strand = _parse_strand(row.get('ORIENTATION', '+'))
+                read_name = str(parts[col_indices['read_name']]) if parts[col_indices['read_name']] != '.' else f"read_{i}"
+                strand = _parse_strand(parts[col_indices.get('ORIENTATION', 'F/F')])
                 
                 # Parse MAPQ (handle missing values)
                 try:
-                    mapq = int(row['MAPQ']) if pd.notna(row['MAPQ']) and str(row['MAPQ']) != '.' else 30
+                    mapq_str = parts[col_indices.get('MAPQ', '60')]
+                    mapq = int(mapq_str) if mapq_str != '.' else 30
                 except (ValueError, TypeError):
                     mapq = 30
                 
                 # Parse CIGAR
-                cigar = str(row['cigar']) if pd.notna(row['cigar']) else ""
+                cigar = str(parts[col_indices.get('cigar', '')]) if parts[col_indices.get('cigar', '')] != '.' else ""
                 
                 # Determine if primary alignment
                 is_primary = True  # Default assumption
                 
                 # Parse additional flags
                 flags = {
-                    'note': str(row['note']) if pd.notna(row['note']) else "",
-                    'read_len': int(row['read_len']) if pd.notna(row['read_len']) else 0,
-                    'tlen': int(row['TLEN']) if pd.notna(row['TLEN']) and str(row['TLEN']) != '.' else 0,
-                    'mate_unmapped': bool(row['MATE_UNMAPPED']) if pd.notna(row['MATE_UNMAPPED']) else False,
-                    'is_proper_pair': bool(row['IS_PROPER_PAIR']) if pd.notna(row['IS_PROPER_PAIR']) else False,
-                    'orientation': str(row['ORIENTATION']) if pd.notna(row['ORIENTATION']) else "+",
-                    'seq': str(row['SEQ']) if pd.notna(row['SEQ']) else ""
+                    'note': str(parts[col_indices.get('note', '')]) if parts[col_indices.get('note', '')] != '.' else "",
+                    'read_len': int(parts[col_indices.get('read_len', '0')]) if parts[col_indices.get('read_len', '0')] != '.' else 0,
+                    'tlen': int(parts[col_indices.get('TLEN', '0')]) if parts[col_indices.get('TLEN', '0')] != '.' else 0,
+                    'mate_unmapped': bool(int(parts[col_indices.get('MATE_UNMAPPED', '0')])) if parts[col_indices.get('MATE_UNMAPPED', '0')] != '.' else False,
+                    'is_proper_pair': bool(int(parts[col_indices.get('IS_PROPER_PAIR', '0')])) if parts[col_indices.get('IS_PROPER_PAIR', '0')] != '.' else False,
+                    'orientation': str(parts[col_indices.get('ORIENTATION', 'F/F')]) if parts[col_indices.get('ORIENTATION', 'F/F')] != '.' else "F/F",
+                    'seq': str(parts[col_indices.get('SEQ', '')]) if parts[col_indices.get('SEQ', '')] != '.' else ""
                 }
                 
                 candidate = Candidate(
@@ -117,14 +140,14 @@ def load_per_read_candidates(tsv_path: str):
                     read=read_name,
                     strand=strand,
                     mapq=mapq,
-                    cigar=cigar,
                     prim=is_primary,
+                    cigar=cigar,
                     flags=flags
                 )
                 candidates.append(candidate)
                 
             except Exception as e:
-                print(f"Warning: Skipping row {i+1} due to error: {e}")
+                print(f"Warning: Skipping line {i+1} due to error: {e}")
                 continue
         
         print(f"Successfully parsed {len(candidates)} candidates")
