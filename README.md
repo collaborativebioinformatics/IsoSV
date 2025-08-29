@@ -30,6 +30,13 @@ Detecting structural variants (SVs) from RNA-seq data presents unique challenges
 
 RNA structural variants are any transcript-level rearrangements observed in RNA-seq reads, whereas transcript fusions are specific chimeric transcripts joining exons from two separate genes, often reflecting underlying DNA rearrangements.
 
+
+## Workflow
+
+The IsoSV workflow for structural variant analysis was designed to identify and evaluate candidate variants from RNA sequencing data. The process begins with parsing BAM files from RNASeq data (Long Read and Short Read), where input BAM alignments are filtered based on mapping quality (XXXX), and candidate variants larger than 30-50 bp are extracted. These candidates are exported into text or VCF files. Next, a data structure for genomic intervals is used to cluster similar candidate entries, generating consolidated variant calls in text or VCF format. To enrich for biological relevance, candidate regions are prioritized using external known annotation resources such as BED or GFF files are incorporated to annotate candidates, producing an updated VCF with annotated structural variants. For visualization, the resulting VCF files are inspected in IGV. Finally, benchmark datasets (HG002) are used for evaluation as a truthset using bedtools and RNASeq coverage profiles to validate expression of the candidate events. To benchmark performance, we constructed a GIAB truth set of large indels by combining two sources: (i) structural variant calls annotated with SVTYPE and SVLEN, and (ii) indel calls derived from reference/alternative allele length differences (≥30 bp). Each variant was represented as a ±10 bp window in BED format. Overlap between Clair3-RNA candidate large indels and GIAB truth sets was assessed using bedtools intersect. Validation was defined as any overlap between candidate and GIAB indels within this positional tolerance.
+
+<img width="1856" height="1488" alt="IsoSV-Workflow-Final" src="https://github.com/user-attachments/assets/b1027143-64b0-4679-9318-8c29723d9e52" />
+
 ## Installation
 
 ### 🚀 **Getting Started**
@@ -47,13 +54,6 @@ Step 2: IsoClustering - Processes candidate events to merge overlapping signals 
 Step 3: IsoAnnotator - overlays SVs with transcript annotations, classifying them as exon deletions, gene fusions, canonical splice events, or intronic rearrangements. This  annotation ensures that SV calls are interpretable and aligned with known genes.
 
 [Running IsoAnnotator](https://github.com/collaborativebioinformatics/IsoSV/blob/main/step_c_IsoAnnotator/readme.md)
-
-
-## Workflow
-
-The IsoSV workflow for structural variant analysis was designed to identify and evaluate candidate variants from RNA sequencing data. The process begins with parsing BAM files from RNASeq data (Long Read and Short Read), where input BAM alignments are filtered based on mapping quality (XXXX), and candidate variants larger than 30-50 bp are extracted. These candidates are exported into text or VCF files. Next, a data structure for genomic intervals is used to cluster similar candidate entries, generating consolidated variant calls in text or VCF format. To enrich for biological relevance, candidate regions are prioritized using external known annotation resources such as BED or GFF files are incorporated to annotate candidates, producing an updated VCF with annotated structural variants. For visualization, the resulting VCF files are inspected in IGV. Finally, benchmark datasets (HG002) are used for evaluation as a truthset using bedtools and RNASeq coverage profiles to validate expression of the candidate events. To benchmark performance, we constructed a GIAB truth set of large indels by combining two sources: (i) structural variant calls annotated with SVTYPE and SVLEN, and (ii) indel calls derived from reference/alternative allele length differences (≥30 bp). Each variant was represented as a ±10 bp window in BED format. Overlap between Clair3-RNA candidate large indels and GIAB truth sets was assessed using bedtools intersect. Validation was defined as any overlap between candidate and GIAB indels within this positional tolerance.
-
-<img width="1856" height="1488" alt="IsoSV-Workflow-Final" src="https://github.com/user-attachments/assets/b1027143-64b0-4679-9318-8c29723d9e52" />
 
 
 
