@@ -25,46 +25,93 @@ def load_tx_tree(filepath):
         return pickle.load(f)
 
 def annotate_candidates(candidates: pd.DataFrame, tx_tree):
-    
     results = []
 
-    for _, candidate in candidates.iterrows():
-        chrom, start, end, svtype, support, median_svlen, *misc = candidate
+    for _, row in candidates.iterrows():
+        chrom, start, end, svtype, support, median_svlen, *misc = row
         
         if not str(chrom).startswith("chr"):
             chrom = "chr" + str(chrom)
         
-        overlapping_transcripts = tx_tree[chrom][start:end]
+        if chrom not in tx_tree:
+            continue
+        overlapping_hits = tx_tree[chrom][start:end]
         
-        if not overlapping_transcripts: ## Case: purely intergenic
-            feature = "intergenic"
-            results.append((chrom, start, end, svtype, support, median_svlen, "intergenic", "na", "na", "na"))
-        elif len(overlapping_transcripts) == 1:
-            ## simple SVs
-            feature = next(iter(overlapping_transcripts)).data
-            results.append((chrom, start, end, svtype, support, median_svlen, feature[0], feature[1], feature[2], feature[3]))
-        else:
-            ## fusion?
-            feature0, feature1, feature2, feature3 = "", "", "", ""
+        # 1. Handle Intergenic case
+        if not overlapping_hits:
+            results.append((chrom, start, end, "Intergenic", support, median_svlen, "Intergenic", "na", "na", "na"))
+            continue
+
+        # 2. Collect detailed information from all hits
+        touched_genes = set()
+        hit_exons = []
+        hit_introns = []
+        
+        all_tx_aliases = set()
+        all_gene_biotypes = set()
+        all_tx_biotypes = set()
+
+        for hit in overlapping_hits:
+            region_str, tx_alias, gene_biotype, tx_biotype = hit.data
+            try:
+                gene_name, _, region_type = region_str.split(":", 2)
+            except ValueError:
+                continue # Skip malformed data
+
+            touched_genes.add(gene_name)
+            all_tx_aliases.add(tx_alias)
+            all_gene_biotypes.add(gene_biotype)
+            all_tx_biotypes.add(tx_biotype)
+
+            if 'exon' in region_type:
+                hit_exons.append(hit)
+            elif 'intron' in region_type:
+                hit_introns.append(hit)
+
+        # 3. Apply classification logic
+        final_annotation = "Intergenic" # Default
+
+        if len(touched_genes) > 1:
+            final_annotation = "Gene_Fusion"
+        elif len(touched_genes) == 1:
+            final_annotation = "Intronic/Novel_Splicing" # Default for single-gene events
+
+            # Check for Exonic Deletion
+            is_exonic_deletion = False
+            for exon_hit in hit_exons:
+                if start <= exon_hit.begin and end >= exon_hit.end:
+                    is_exonic_deletion = True
+                    break
             
-            ## If a single transcript is involved, no fusion induced by deletion
-            involved_tx = [iv.data[0].split(":")[1] for iv in overlapping_transcripts]
-            
-            if len(involved_tx) == 1:
-                for tx in overlapping_transcripts:
-                    feature0 += tx.data[0] + ";"
-                    feature1 += tx.data[1] + ";"
-                    feature2 += tx.data[2] + ";"
-                    feature3 += tx.data[3] + ";"
-                results.append((chrom, start, end, svtype, support, median_svlen, feature0, feature1, feature2, feature3))
+            if is_exonic_deletion:
+                final_annotation = "Exonic_Deletion"
             else:
-                ## candidate fusion induced by long deletion
-                for tx in overlapping_transcripts:
-                    feature0 += tx.data[0] + ";"
-                    feature1 += tx.data[1] + ";"
-                    feature2 += tx.data[2] + ";"
-                    feature3 += tx.data[3] + ";"
-                results.append((chrom, start, end, "FUSION", support, median_svlen, feature0, feature1, feature2, feature3))
+                # Check for Canonical Splicing only if not an exonic deletion
+                is_canonical_splicing = False
+                for intron_hit in hit_introns:
+                    if abs(start - intron_hit.begin) <= 5 and abs(end - intron_hit.end) <= 5:
+                        is_canonical_splicing = True
+                        break
+                if is_canonical_splicing:
+                    final_annotation = "Canonical_Splicing"
+
+        # 4. Format results for VCF output
+        region_field = ",".join(sorted(list(touched_genes))) if touched_genes else "na"
+        tx_alias_field = ",".join(sorted(list(all_tx_aliases))) or "na"
+        gene_biotype_field = ",".join(sorted(list(all_gene_biotypes))) or "na"
+        tx_biotype_field = ",".join(sorted(list(all_tx_biotypes))) or "na"
+
+        results.append((
+            chrom, start, end,
+            final_annotation,
+            support,
+            median_svlen,
+            region_field,
+            tx_alias_field,
+            gene_biotype_field,
+            tx_biotype_field
+        ))
+            
     return results
 
 def write_to_vcf(annotated_df, outpath):
