@@ -195,9 +195,13 @@ def load_clustered_summary_candidates(tsv_path: str):
         for i, line in enumerate(data_lines[1:], 1):  # Skip header, start from line 1
             try:
                 parts = line.split('\t')
-                if len(parts) != len(header):
-                    print(f"Warning: Line {i+1} has {len(parts)} parts, expected {len(header)}. Skipping.")
-                    continue
+                
+                # Handle inconsistent column counts by padding with empty strings
+                if len(parts) < len(header):
+                    parts.extend([''] * (len(header) - len(parts)))
+                elif len(parts) > len(header):
+                    # Truncate to header length
+                    parts = parts[:len(header)]
                 
                 # Parse chromosome
                 chrom = _add_chr_prefix(parts[col_indices['chrom']])
@@ -235,10 +239,29 @@ def load_clustered_summary_candidates(tsv_path: str):
                 # Determine if primary alignment
                 is_primary = True  # Default assumption
                 
-                # Parse additional flags
-                support = int(parts[col_indices.get('support', '1')]) if parts[col_indices.get('support', '1')] != '.' else 1
-                genes = str(parts[col_indices.get('genes', '')]) if parts[col_indices.get('genes', '')] != '.' else ""
-                ins_seq = str(parts[col_indices.get('example_ins_seq', '')]) if parts[col_indices.get('example_ins_seq', '')] != '.' else ""
+                # Parse additional flags with safe access
+                support = 1
+                try:
+                    if 'support' in col_indices and col_indices['support'] < len(parts):
+                        support_val = parts[col_indices['support']]
+                        if support_val != '.' and support_val.strip():
+                            support = int(support_val)
+                except (ValueError, IndexError):
+                    support = 1
+                
+                genes = ""
+                try:
+                    if 'genes' in col_indices and col_indices['genes'] < len(parts):
+                        genes = str(parts[col_indices['genes']]) if parts[col_indices['genes']] != '.' else ""
+                except IndexError:
+                    genes = ""
+                
+                ins_seq = ""
+                try:
+                    if 'example_ins_seq' in col_indices and col_indices['example_ins_seq'] < len(parts):
+                        ins_seq = str(parts[col_indices['example_ins_seq']]) if parts[col_indices['example_ins_seq']] != '.' else ""
+                except IndexError:
+                    ins_seq = ""
                 
                 flags = {
                     'support': support,
@@ -246,7 +269,9 @@ def load_clustered_summary_candidates(tsv_path: str):
                     'ins_seq': ins_seq,
                     'format': 'clustered_summary',
                     'original_pos': pos_start,
-                    'original_end': pos_end
+                    'original_end': pos_end,
+                    'line_number': i + 1,
+                    'column_count': len(parts)
                 }
                 
                 candidate = Candidate(
@@ -269,6 +294,13 @@ def load_clustered_summary_candidates(tsv_path: str):
                 continue
         
         print(f"Successfully parsed {len(candidates)} clustered summary candidates")
+        
+        # Report on parsing statistics
+        total_lines = len(data_lines) - 1  # Exclude header
+        skipped_lines = total_lines - len(candidates)
+        if skipped_lines > 0:
+            print(f"Parsing summary: {total_lines} total lines, {len(candidates)} parsed, {skipped_lines} skipped")
+        
         return candidates
         
     except Exception as e:
@@ -319,13 +351,13 @@ def auto_detect_format_and_load(tsv_path: str):
         return []
 
 
-def test_interval_tree_with_candidates(candidates):
+def test_interval_tree_with_candidates(candidates, window_size=100):
     """Test the interval tree functionality with provided candidates."""
     if not candidates:
         print("No candidates to test!")
         return
     
-    print(f"Testing with {len(candidates)} candidates")
+    print(f"Testing with {len(candidates)} candidates using window size: {window_size}")
     
     # Test structurer
     print("\nTesting candidate structurer with intervaltree...")
@@ -378,10 +410,9 @@ def test_interval_tree_with_candidates(candidates):
     # Overlap query: use a mid DEL (or any candidate if not enough)
     target = dels[len(dels)//2] if len(dels) >= 3 else (dels[0] if dels else (ins[0] if ins else None))
     if target:
-        ov_w = 100
-        ostart, oend = max(0, target.pos - ov_w), target.end + ov_w
+        ostart, oend = max(0, target.pos - window_size), target.end + window_size
         ov_hits = structurer.query_overlap(target.chrom, target.svtype, ostart, oend)
-        print(f"\nOverlap query around {target.chrom}:{target.pos}-{target.end} {target.svtype} (±{ov_w}): {len(ov_hits)} hits")
+        print(f"\nOverlap query around {target.chrom}:{target.pos}-{target.end} {target.svtype} (±{window_size}): {len(ov_hits)} hits")
         for c in ov_hits[:10]:
             print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype}")
         if len(ov_hits) > 10:
@@ -392,20 +423,57 @@ def test_interval_tree_with_candidates(candidates):
     # Test overlapping candidates with window
     print("\n--- Testing overlapping candidates with window ---")
     test_candidate = candidates[0]
-    overlapping = structurer.get_overlapping_candidates(test_candidate, window=100)
+    overlapping = structurer.get_overlapping_candidates(test_candidate, window=window_size)
     print(f"Candidates overlapping with {test_candidate.chrom}:{test_candidate.pos}-{test_candidate.end} "
-          f"{test_candidate.svtype} (window=100): {len(overlapping)}")
+          f"{test_candidate.svtype} (window={window_size}): {len(overlapping)}")
     for c in overlapping[:5]:
         print(f"  {c.chrom}:{c.pos}-{c.end} {c.svtype} (read={c.read})")
     if len(overlapping) > 5:
         print(f"  ... {len(overlapping)-5} more")
     
+    # Test interval merging/clustering
+    print(f"\n--- Testing interval merging with window {window_size} ---")
+    merged_intervals = merge_overlapping_intervals(candidates, window_size)
+    print(f"Original candidates: {len(candidates)}")
+    print(f"Merged intervals: {len(merged_intervals)}")
+    
+    if len(merged_intervals) < len(candidates):
+        print("Intervals were successfully merged!")
+        print("\nMerged intervals in TSV format:")
+        print("clusterid\tchrom\tstart\tend\ttype\tsupport\tmedian_sv_len\treads\tread_positions")
+        for i, merged in enumerate(merged_intervals[:10]):
+            # Extract reads and positions from merged candidates
+            merged_candidates = merged.flags.get('merged_candidates', [merged])
+            reads = [c.read for c in merged_candidates]
+            reads_str = ','.join(reads) if reads else merged.read
+            
+            # Create read positions string (chrom:start:end for each read)
+            read_positions = []
+            for c in merged_candidates:
+                pos_str = f"{c.chrom}:{c.pos}:{c.end}"
+                read_positions.append(pos_str)
+            read_positions_str = ','.join(read_positions)
+            
+            # Support is the count of merged reads
+            support = len(merged_candidates)
+            
+            # Format output as TSV
+            print(f"cluster_{i+1:03d}\t{merged.chrom}\t{merged.pos}\t{merged.end}\t{merged.svtype}\t{support}\t{merged.svlen}\t{reads_str}\t{read_positions_str}")
+        if len(merged_intervals) > 10:
+            print(f"... {len(merged_intervals)-10} more merged intervals")
+    else:
+        print("No intervals were merged. This might indicate:")
+        print("   - All intervals are too far apart")
+        print("   - Window size is too small")
+        print("   - Intervals are on different chromosomes/SV types")
+    
     # Test tree visualization
     print("\n--- Tree visualization ---")
-    if dels:
-        print(structurer.get_tree_visualization(dels[0].chrom, "DEL"))
-    elif ins:
-        print(structurer.get_tree_visualization(ins[0].chrom, "INS"))
+    if dels or ins:
+        if dels:
+            print(structurer.get_tree_visualization(dels[0].chrom, "DEL"))
+        if ins:
+            print(structurer.get_tree_visualization(ins[0].chrom, "INS"))
     elif softclips:
         print(structurer.get_tree_visualization(softclips[0].chrom, "SOFTCLIP"))
     elif splits:
@@ -414,6 +482,107 @@ def test_interval_tree_with_candidates(candidates):
         print("No candidates to visualize.")
     
     print("\nTest completed!")
+
+
+def merge_overlapping_intervals(candidates, window_size):
+    """Merge overlapping intervals within the specified window size.
+    
+    This function implements a simple clustering approach to merge nearby intervals
+    of the same SV type on the same chromosome.
+    """
+    if not candidates:
+        return []
+    
+    # Group candidates by chromosome and SV type
+    grouped = {}
+    for candidate in candidates:
+        key = (candidate.chrom, candidate.svtype)
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(candidate)
+    
+    merged_intervals = []
+    
+    for (chrom, svtype), group_candidates in grouped.items():
+        # Sort by position
+        group_candidates.sort(key=lambda x: x.pos)
+        
+        # Simple merging: group consecutive candidates within window
+        current_group = [group_candidates[0]]
+        
+        for i in range(1, len(group_candidates)):
+            candidate = group_candidates[i]
+            
+            # Check if this candidate should join the current group
+            should_merge = False
+            for existing in current_group:
+                # Check if positions are within window
+                if (abs(candidate.pos - existing.pos) <= window_size and 
+                    abs(candidate.end - existing.end) <= window_size):
+                    should_merge = True
+                    break
+            
+            if should_merge:
+                current_group.append(candidate)
+            else:
+                # Finalize current group and start new one
+                merged = merge_candidate_group(current_group)
+                merged_intervals.append(merged)
+                current_group = [candidate]
+        
+        # Don't forget the last group
+        if current_group:
+            merged = merge_candidate_group(current_group)
+            merged_intervals.append(merged)
+    
+    return merged_intervals
+
+
+def merge_candidate_group(candidates):
+    """Merge a group of candidates into a single representative candidate."""
+    if not candidates:
+        return None
+    
+    if len(candidates) == 1:
+        # Single candidate, just add merge info
+        candidate = candidates[0]
+        candidate.flags['merged_count'] = 1
+        candidate.flags['merged_from'] = [candidate.read]
+        candidate.flags['merged_candidates'] = [candidate]
+        return candidate
+    
+    # Calculate merged coordinates (median for robustness)
+    positions = [c.pos for c in candidates]
+    ends = [c.end for c in candidates]
+    svlens = [c.svlen for c in candidates]
+    
+    merged_pos = int(sum(positions) / len(positions))  # Average position
+    merged_end = int(sum(ends) / len(ends))            # Average end
+    merged_svlen = int(sum(svlens) / len(svlens))      # Average length
+    
+    # Use the first candidate as template
+    merged = Candidate(
+        chrom=candidates[0].chrom,
+        pos=merged_pos,
+        end=merged_end,
+        svtype=candidates[0].svtype,
+        svlen=merged_svlen,
+        read=f"merged_{len(candidates)}_candidates",
+        strand=candidates[0].strand,
+        mapq=max(c.mapq for c in candidates),  # Best MAPQ
+        cigar="",  # No CIGAR for merged
+        prim=True,
+        flags={
+            'merged_count': len(candidates),
+            'merged_from': [c.read for c in candidates],
+            'merged_candidates': candidates,
+            'original_positions': positions,
+            'original_ends': ends,
+            'format': 'merged'
+        }
+    )
+    
+    return merged
 
 
 
@@ -461,7 +630,7 @@ Examples:
         candidates = load_clustered_summary_candidates(args.input)
     
     if candidates:
-        test_interval_tree_with_candidates(candidates)
+        test_interval_tree_with_candidates(candidates, args.window)
     else:
         print("Failed to load candidates. Exiting.")
         sys.exit(1)

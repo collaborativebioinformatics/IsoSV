@@ -178,7 +178,7 @@ class CandidateStructurer:
         for idx, iv in enumerate(sorted(tree._tree, key=lambda x: (x.begin, x.end))[:max_intervals], start=1):
             cand: Candidate = iv.data
             lines.append(
-                f"{idx:3d}. [{iv.begin:8d}, {iv.end - 1:8d}) {cand.svtype:4s} len={cand.svlen:6d} read={cand.read}"
+                f"{idx:3d}. [{iv.begin:8d}, {iv.end - 1:8d}) {cand.svtype:4s} len={cand.svlen} read={cand.read}"
             )
         if len(tree) > max_intervals:
             lines.append(f"... and {len(tree) - max_intervals} more intervals")
