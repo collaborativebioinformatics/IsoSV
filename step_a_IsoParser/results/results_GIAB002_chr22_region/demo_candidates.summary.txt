@@ -1,0 +1,16 @@
+{
+  "total_examined": 2001,
+  "total_candidates": 131,
+  "total_skipped": 0,
+  "counts": {
+    "DEL": 81,
+    "INS": 40,
+    "SOFTCLIP": 10
+  },
+  "clusters_found": 0
+}
+
+Human-readable counts by type:
+DEL: 81 (61.8%)
+INS: 40 (30.5%)
+SOFTCLIP: 10 (7.6%)

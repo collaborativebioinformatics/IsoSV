@@ -1,2 +1,0 @@
-chrom	start	end	type	support	median_sv_len	reads	genes
-21	33021905	33021905	INS	2	1	ERR001268.12534243,ERR001302.10759664	
