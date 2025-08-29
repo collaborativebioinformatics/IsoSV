@@ -4,11 +4,37 @@
 - [Google Doc - Team 9](https://docs.google.com/document/d/1i5qklL01o8b1E8FYtd3IBWgXcedRDMfNrrp3aHU8AwE/edit?tab=t.0)
 - [SV Hackathon 2025](https://fritzsedlazeck.github.io/blog/2025/hackathon-2025/)
 
+**Long Read**
 - [GIAB002_chr22_region.bam](https://drive.google.com/drive/folders/1y48dxKJYkRXxDcEt6kTNbaEs6qCvUD8I?usp=drive_link)
+
+**Short Read**
+- [chr22.bam](https://drive.google.com/drive/folders/1udSRBNAhaS4xwd-hQ0pE4PgLi8kSQbXB)
 
 ---
 
-* `iso_parser.py` — the single main script. It performs robust parsing, per-read candidate extraction, optional clustering, and optional GTF annotation (if you supply a GTF).
+## Aim : detect SV-sized indels and candidate breakpoints in short-read RNA/DNA BAMs using:
+
+- CIGAR `I`/ `D` (ins/del)
+- Soft/hard clips at read ends (`S` / `H`)
+- Split reads via `SA` tag (supplementary alignment)
+
+---
+
+
+## Short Read:
+* `sr_isoSV_parser.py` — short-read focused parser that produces the same three TSV outputs the long-read script uses:
+
+
+## Long Read:
+* `lr_isoSV_parser.py`  - 
+
+
+### Output:
+  - <prefix>.indels.tsv
+
+  - <prefix>.softclips.tsv
+
+  - <prefix>.splits.tsv
 
 ---
 
@@ -68,35 +94,39 @@ Store that file somewhere accessible and pass `--gtf /path/to/gencode.v43.annota
 
 ## How to run (examples)
 
-
-**Minimal (write outputs next to `demo_candidates.tsv`):**
-
+Basic:
 
 ```bash
-python iso_parser.py bamExample.bam demo_candidates.tsv
+python sr_isoSV_parser.py input.bam -o results
 ```
 
-
-**Put all outputs into `results/` directory:**
-
-
+**With gene annotation (if gene BED uses column 7 for gene symbol, for example):**
 ```bash
-python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/
+python sr_isoSV_parser.py input.bam -o results \
+  --gene-bed gencode.v43.annotation.genes.bed --gene-name-col 7
 ```
 
-**Use low thresholds for quick debugging + cluster with support >=2:**
-
-
+**Quick debug (recommended SR-friendly small thresholds):**
 ```bash
-python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/ \
---insert 1 --delete 1 --softclip 1 --sample-parse 2000 \
---cluster-window 50 --min-support 2 --salvage
+python sr_isoSV_parser.py input.bam -o results \
+  --min-ins 1 --min-del 1 --min-clip 1 --bp-window 25
 ```
 
-**Report discordant paired-end events (mate-unmapped, not-proper, large insert):**
+**Full run example:**
 ```bash
-python iso_parser.py input.bam demo_candidates.tsv --report-discordant --out-dir results/
+python sr_isoSV_parser.py chr22.bam -o chr22_ShortReadSVs \
+  --min-ins 20 --min-del 20 --min-clip 20 --bp-window 50 \
+  --gene-bed gencode.v43.annotation.genes.bed --gene-name-col 7
 ```
+
+Short reads need different defaults than long reads — suggestions:
+
+- Small indel discovery (sensitive): `--min-ins 1 --min-del 1` (great for tiny indels, expect many calls)
+- Balanced / typical SR indel detection: `--min-ins 5 --min-del 5`
+- Conservative (reduce false positives): `--min-ins 20 --min-del 20`
+- Soft-clip: `--min-clip` often ~ `8–25` for SR depending on read length and goal
+- Clustering window: `--bp-window` ~ `8–25` (tighter than LR script).
+- Internal S (soft-clip): for short reads you usually care about end-clips; the script already reports left/right end clips and ignores internal S as breakpoint signal by default.
 
 ## Outputs and column definitions
 
@@ -104,41 +134,52 @@ python iso_parser.py input.bam demo_candidates.tsv --report-discordant --out-dir
 When the parser finishes it writes a per-read candidates TSV and several helper files. The per-read TSV has the following header columns:
 
 
-```
-chrom	pos_start	pos_end	read_name	sv_type	sv_len	note	read_len	cigar	MAPQ	TLEN	MATE_UNMAPPED	IS_PROPER_PAIR	ORIENTATION	SEQ
-```
 
+
+### `<prefix>.indels.tsv`
+```
+chrom  pos  end  svtype  length  support  median_mapq  example_reads  example_ins_seq  genes
+```
 
 Column meanings:
-- **chrom** — reference sequence name (e.g. `1`, `chr1`, `21`, `X`) where the read aligned.
-- **pos_start** — 0-based reference coordinate where the event begins (for insertions this is the base *before* the inserted sequence; for deletions it is the first deleted base; for soft-clips it's the position on the reference adjacent to the clipped sequence).
-  - For `INS`: the base immediately before the inserted sequence (insertion occurs between bases), so pos_end == pos_start.
-  - For `DEL`: first deleted base (0-based).
-  - For `SOFTCLIP`: reference position adjacent to clipped bases (left/right/internal note further clarifies).
-  - For `LARGE_N`: start of the skipped region (N) on the reference.
-
-- **pos_end** — 0-based inclusive end coordinate of the event on the reference. For insertions this is equal to `pos_start` (the insertion occurs between bases). For events that span bases (deletions, LARGE_N), this is `pos_start + sv_len - 1`.
-- **read_name** — query/read identifier (QNAME) from the BAM (useful to inspect supporting reads manually in IGV or samtools).
-- **sv_type** — event type detected in the read. Typical values:
+- `chrom` — reference (e.g. `chr17` or `17`)
+- `pos` — 1-based start (INS: base before inserted seq; DEL: first deleted base)
+- `end` — inclusive end (for DEL: pos + length - 1; for INS: = pos)
+- `svtype` — `INS` or `DEL`
   - `INS` — insertion present in the read relative to the reference (CIGAR `I`)
   - `DEL` — deletion present in the read relative to the reference (CIGAR `D`)
-  - `SOFTCLIP` — soft-clipped bases at the read ends (CIGAR `S`) — possible breakpoint
-  - `LARGE_N` — very large `N` (skipped region) in the CIGAR (often large introns, reported only if `--large-N` threshold is set)
-  - `SPLIT` — split / supplementary alignment indicated via `SA` tag
-  - `MATE_UNMAPPED` — paired read mate is unmapped
-  - `DISC_PAIR` — discordant pair (not proper)
-  - `LARGE_INSERT` — abnormally large template length (TLEN)
+- `length` — integer length
+- `support` — cluster support (distinct reads)
+- `median_mapq` — median MAPQ of cluster
+- `example_reads` — comma-separated supporting read names (max limited via --max-readnames)
+- `example_ins_seq` — an example inserted sequence if available
+- `genes` — comma-separated overlapping gene names (empty if none)
 
-- **sv_len** — integer length of the event reported (number of inserted or deleted bases, soft-clip length, or skipped `N` length). For `SPLIT` this will be `0` and the `note` explains the cause.
-- **note** — short human-readable note describing why the read was reported (e.g. `CIGAR_I`, `CIGAR_D`, `CIGAR_S_left`, `SA_tag`, or `SALVAGED_CIGAR_I`). Salvaged detections (from reads that caused parse errors) are prefixed with `SALVAGED_`.
-- **read_len** — length of the read sequence (number of bases in the read). This helps to disambiguate short vs long reads and to assess reliability of soft-clip signals.
-- **cigar** — the exact CIGAR string for the alignment as present in the BAM (e.g. `12M1I23M`). This is written verbatim so you can reproduce the detection logic later.
-- **MAPQ** — mapping quality of the read (integer). A missing/unknown value is given as `.`.
-- **TLEN** — template length (TLEN/TLEN field from BAM). For paired-end reads this is the signed insert length; stored as absolute for reporting where relevant; missing/zero often shown as `.`.
-- **MATE_UNMAPPED** — `1` if mate is unmapped, `0` otherwise.
-- **IS_PROPER_PAIR** — `1` if `is_proper_pair` is true (flag 0x2), `0` otherwise.
-- **ORIENTATION** — strand orientation of read and mate in `READ/MATE` form using `F` (forward) and `R` (reverse)`. See the orientation mapping below.
-  Below is the shorthand → TSV mapping we use:
+### `<prefix>.shortclips.tsv`
+```
+chrom  pos  side  support  median_mapq  median_cliplen  example_reads  genes
+```
+
+Column meanings:
+- `side` — `L` or `R` (left/right clip)
+- `pos` — 1-based coordinate for the clip (left = reference_start+1, right = reference_end)
+- `median_cliplen` — median clip length for the cluster
+
+### `<prefix>.splits.tsv`
+```
+chrom1  pos1  chrom2  pos2  support  median_mapq  notes  example_reads  genes_left  genes_right
+```
+
+Column meanings:
+- `chrom1,pos1` — primary side breakpoint (1-based)
+- `chrom2,pos2` — supplementary alignment side (1-based)
+- `genes_left` / `genes_right` — overlapping gene names on each side (empty string if none)
+  - exact overlap only (no nearest-gene fallback by default). The gene loader tries to match `chr` vs non-`chr` names and will pull gene names from the BED column you specify.
+
+### ORIENTATION
+- strand orientation of read and mate in `READ/MATE` form using `F` (forward) and `R` (reverse)`. See the orientation mapping below.
+
+Below is the shorthand → TSV mapping we use:
   - `+`    = forward strand → `F`
   - `-`    = reverse strand → `R`
   - `+/-`  = read on forward, mate on reverse → `F/R`
@@ -147,22 +188,7 @@ Column meanings:
   - `-/-`  = both reverse → `R/R`
 - **SEQ** — read sequence (query sequence) if available, or `.` when missing.
 
-
-
-## Other files
-
-
-- `candidates.tsv.errors.log` — logged parse and salvage errors (if any). Useful for debugging malformed BAMs.
-- `candidates.tsv.clusters.tsv` and `candidates.tsv.clusters.txt` — output of per-read clustering (identical contents, TSV with cluster coordinates, type, support and list of supporting read names). Generated only when `--cluster-window` is used.
-- `candidates.tsv.summary.txt` — short JSON + human-readable summary of counts (total reads examined, total candidates, per-type counts, skipped reads).
-
-<!-- ### Cluster and annotate with Gencode v43 (example):
-``` bash 
-python iso_parser.py input.bam candidates.tsv --cluster-window 50 --min-support 2 --gtf gencode.v43.annotation.gtf.gz
-``` -->
-
 ### Quick check: indel size distribution from CIGAR
-
 Use this to see how many insertions (`I`) and deletions (`D`) of each size exist in a BAM (quick way to pick thresholds):
 
 Perl one-liner (fast & compact):
@@ -174,4 +200,4 @@ samtools view bamExample.bam \
 
 ---
 
-> To test: `python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results_bamExample/ --insert 1 --delete 1 --softclip 1 --sample-parse 2000 \ --cluster-window 50 --min-support 2 --salvage`
+### > To test: `python sr_isoSV_parser.py chr22.bam -o chr22_ShortReadSVs \--min-ins 20 --min-del 20 --min-clip 20 --bp-window 50 --gene-bed gencode.v43.annotation.genes.bed --gene-name-col 7`
