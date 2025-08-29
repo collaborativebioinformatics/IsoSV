@@ -14,7 +14,7 @@ python3
 
 ## Workflow
 
-The procecess is divided into two main stages: a one-time pre-computation and the main annotation script.
+The process is divided into two main stages: a one-time pre-computation and the main annotation script.
 
 **1. Pre-computation (Run this once)**
 
@@ -34,7 +34,21 @@ N.B.: These files are now placed under `resources/` for easy reference.
 
 **2. Run Annotation**
 
-Once the cache is built, run the main annotation script.
+Once the cache is built, run the main annotation script either to generate a csv file or vcf files as below
+
+```bash
+# Usage:
+python scripts/annotate_svs.py \
+    --input <path_to_sv_candidates.tsv> \
+    --tree resources/tx_tree_cache.pkl \
+    --output results/annotated_regions.csv
+
+# Example with mock data from Step B:
+python scripts/annotate_svs.py \
+    --input ../step_b_IsoClustering/test_data/chr21_SVs_converted.tsv \
+    --tree resources/tx_tree_cache.pkl \
+    --output results/annotated_regions.csv
+```
 
 ```bash
 usage: annotate.py [-h] --candidates CANDIDATES --cache CACHE -o OUTDIR
@@ -62,7 +76,7 @@ The main output of this step is `results/annotated_regions.csv`. This file conta
 
 The `Annotation` column can have one of the following values:
 
-- **`Gene_Fusion(Fusion)`**: The SV's coordinates overlap with two or more distinct genes, suggesting a large-scale rearrangement.
+- **`Gene_Fusion`**: The SV's coordinates overlap with two or more distinct genes, suggesting a large-scale rearrangement.
   - 1. Large deletions spanning >1 genes
   - 2. INS of known gene regions (might need de novo assembly from RNAseq data? SR should be pretty noisy for this ...)
 - **`Exonic_Deletion`**: The SV occurs within a single gene and completely contains at least one of its exons.
