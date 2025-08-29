@@ -28,7 +28,13 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
     results = []
 
     for _, row in candidates.iterrows():
-        chrom, start, end, svtype, support, median_svlen, *misc = row
+        # Read columns by name to be robust to input file format changes
+        chrom = row['chrom']
+        start = int(row['start'])
+        end = int(row['end'])
+        svtype = row['type']
+        support = int(row['support'])
+        median_svlen = int(row['median_sv_len'])
         
         if not str(chrom).startswith("chr"):
             chrom = "chr" + str(chrom)
@@ -170,8 +176,9 @@ def main():
 
     ## Write to VCF
     out = pd.DataFrame(annotated, columns=["chr", "start", "stop", "SVTYPE", "SUPPORT", "SVLEN", "REGION", "TX_ALIAS", "BIOTYPE_GENE", "BIOTYPE_TX"])
-    write_to_vcf(out, os.path.join(args.outdir, "sv_candidates.annotated.vcf"))
-    print(f"Result VCF written to {os.path.join(args.outdir, 'sv_candidates.annotated.vcf')}")
+    outpath = os.path.join(args.outdir, "GIAB002_chr22_region_LongReadSV.annotated.vcf")
+    write_to_vcf(out, outpath)
+    print(f"Result VCF written to {outpath}")
     
 if __name__ == "__main__":
     main()
