@@ -20,7 +20,7 @@ def load_tx_tree(filepath):
     """Load the IntervalTree from disk"""
     import pickle
     if not os.path.exists(filepath):
-raise FileNotFoundError("Transcript tree not found! ")
+        raise FileNotFoundError("Transcript tree not found! ")
     with open(filepath, 'rb') as f:
         return pickle.load(f)
 
