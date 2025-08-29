@@ -69,11 +69,11 @@ Store that file somewhere accessible and pass `--gtf /path/to/gencode.v43.annota
 ## How to run (examples)
 
 
-**Minimal (write outputs next to `results.tsv`):**
+**Minimal (write outputs next to `demo_candidates.tsv`):**
 
 
 ```bash
-python iso_parser.py bamExample.bam results.tsv
+python iso_parser.py bamExample.bam demo_candidates.tsv
 ```
 
 
@@ -81,9 +81,8 @@ python iso_parser.py bamExample.bam results.tsv
 
 
 ```bash
-python iso_parser.py bamExample.bam results.tsv --out-dir results/
+python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/
 ```
-
 
 **Use low thresholds for quick debugging + cluster with support >=2:**
 
@@ -96,7 +95,7 @@ python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results/ \
 
 **Report discordant paired-end events (mate-unmapped, not-proper, large insert):**
 ```bash
-python iso_parser.py input.bam results.tsv --report-discordant --out-dir results/
+python iso_parser.py input.bam demo_candidates.tsv --report-discordant --out-dir results/
 ```
 
 ## Outputs and column definitions
@@ -150,11 +149,6 @@ Column meanings:
 
 
 
-
-
-
-
-
 ## Other files
 
 
@@ -180,4 +174,4 @@ samtools view bamExample.bam \
 
 ---
 
-> To test: `python iso_parser.py bamExample.bam demo_candidates.tsv --insert 1 --delete 1 --softclip 1 --sample-parse 2000`
+> To test: `python iso_parser.py bamExample.bam demo_candidates.tsv --out-dir results_bamExample/ --insert 1 --delete 1 --softclip 1 --sample-parse 2000 \ --cluster-window 50 --min-support 2 --salvage`
