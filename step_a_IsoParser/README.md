@@ -20,18 +20,10 @@
 
 ---
 
-
 ## Short read RNASeq bam parser
 * `sr_isoSV_parser.py` — It performs robust parsing, per-read candidate extraction, optional clustering, and optional GTF annotation (if you supply a GTF).
 ## Long read RNASeq bam parser
 * `lr_isoSV_parser.py` — It parses long read RNASeq bam to detect SV signals using CIGAR (I/D), end soft-clips, and SA-tag splits, clusters breakpoints, and annotates with gene names  if gene.bed is provided.
-
-### Output:
-  - `<prefix>.indels.tsv`
-  - `<prefix>.softclips.tsv`
-  - `<prefix>.splits.tsv`
-
----
 
 ## Requirements
 
@@ -52,6 +44,19 @@ Or with conda:
 conda create -n isoparser python=3.9 pysam -c bioconda -c conda-forge
 conda activate isoparser
 ```
+
+## Quick Start
+### Short read parser
+### Long read parser
+
+### Output:
+  - `<prefix>.indels.tsv`
+  - `<prefix>.softclips.tsv`
+  - `<prefix>.splits.tsv`
+
+---
+
+
 
 ---
 
