@@ -12,7 +12,7 @@
 
 ---
 
-## Aim : detect SV-sized indels and candidate breakpoints in short-read RNA/DNA BAMs using:
+## Aim : Detect SV-sized indels and candidate breakpoints in short-read RNA/DNA BAMs using:
 
 - CIGAR `I`/ `D` (ins/del)
 - Soft/hard clips at read ends (`S` / `H`)
@@ -20,21 +20,15 @@
 
 ---
 
-
 ## Short Read:
-* `sr_isoSV_parser.py` — short-read focused parser that produces the same three TSV outputs the long-read script uses:
-
-
+* `sr_isoSV_parser.py` — short-read focused parser
 ## Long Read:
 * `lr_isoSV_parser.py`  - 
 
-
 ### Output:
-  - <prefix>.indels.tsv
-
-  - <prefix>.softclips.tsv
-
-  - <prefix>.splits.tsv
+  - `<prefix>.indels.tsv`
+  - `<prefix>.softclips.tsv`
+  - `<prefix>.splits.tsv`
 
 ---
 
