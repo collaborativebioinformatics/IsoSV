@@ -18,8 +18,3 @@ env/
 *.swo
 .idea/
 .vscode/
-
-
-# any BAM (.bam & .bam.bai)
-*.bam
-*.bam.bai
