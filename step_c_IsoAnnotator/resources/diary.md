@@ -15,3 +15,11 @@ Follow ups:
 - Could be really interesting to work with the cleaned gtf file from the lui..
 - The annotation can be really improved to find define tss and other functional regions
 - Codes could be cleaned up and typed for better organization and reading
+
+Louis progress: 
+- Fixed a bug in tx tree construction, tx_tree can now pinpoint exact overlapping gene regions
+- Added code based on the reconstructed tx tree for SV annotation (INS associated gene fusions will need extensive work into BAM?)
+	- Current code in `annotate.py`, still in tsv format
+- Not yet converted to VCF format
+- Not yet tested on most up-to-date step b files
+- Refactored the old 01 02 scripts 
