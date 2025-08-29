@@ -4,7 +4,6 @@ A pipeline for detecting structural variants from RNA-Seq Data
 <img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
 
 ## Team
-## Team
 - [Fritz Sedlazeck](https://github.com/fritzsedlazeck)
 - [Rupesh Kesharwani](https://github.com/unique379r)
 - [Van Truong](https://github.com/van-truong)
