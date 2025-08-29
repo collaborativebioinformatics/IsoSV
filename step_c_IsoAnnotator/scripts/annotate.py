@@ -41,11 +41,15 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
         
         if chrom not in tx_tree:
             continue
-        overlapping_hits = tx_tree[chrom][start:end]
+        
+        # The query region is the full span for DEL, and a single point for INS
+        query_start = start
+        query_end = end if svtype == 'DEL' else start + 1
+        overlapping_hits = tx_tree[chrom][query_start:query_end]
         
         # 1. Handle Intergenic case
         if not overlapping_hits:
-            results.append((chrom, start, end, "Intergenic", support, median_svlen, "Intergenic", "na", "na", "na"))
+            results.append((chrom, start, end, svtype, "Intergenic", support, median_svlen, "Intergenic", "na", "na", "na"))
             continue
 
         # 2. Collect detailed information from all hits
@@ -62,7 +66,7 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
             try:
                 gene_name, _, region_type = region_str.split(":", 2)
             except ValueError:
-                continue # Skip malformed data
+                continue
 
             touched_genes.add(gene_name)
             all_tx_aliases.add(tx_alias)
@@ -74,32 +78,27 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
             elif 'intron' in region_type:
                 hit_introns.append(hit)
 
-        # 3. Apply classification logic
-        final_annotation = "Intergenic" # Default
+        # 3. Apply classification logic based on SVTYPE
+        final_annotation = "Unclassified" # Default
 
-        if len(touched_genes) > 1:
-            final_annotation = "Gene_Fusion"
-        elif len(touched_genes) == 1:
-            final_annotation = "Intronic/Novel_Splicing" # Default for single-gene events
-
-            # Check for Exonic Deletion
-            is_exonic_deletion = False
-            for exon_hit in hit_exons:
-                if start <= exon_hit.begin and end >= exon_hit.end:
-                    is_exonic_deletion = True
-                    break
-            
-            if is_exonic_deletion:
-                final_annotation = "Exonic_Deletion"
-            else:
-                # Check for Canonical Splicing only if not an exonic deletion
-                is_canonical_splicing = False
-                for intron_hit in hit_introns:
-                    if abs(start - intron_hit.begin) <= 5 and abs(end - intron_hit.end) <= 5:
-                        is_canonical_splicing = True
-                        break
-                if is_canonical_splicing:
-                    final_annotation = "Canonical_Splicing"
+        if svtype == 'DEL':
+            if len(touched_genes) > 1:
+                final_annotation = "Gene_Fusion"
+            elif len(touched_genes) == 1:
+                final_annotation = "Intronic/Novel_Splicing"
+                is_exonic_deletion = any(start <= exon.begin and end >= exon.end for exon in hit_exons)
+                
+                if is_exonic_deletion:
+                    final_annotation = "Exonic_Deletion"
+                else:
+                    is_canonical_splicing = any(abs(start - intron.begin) <= 5 and abs(end - intron.end) <= 5 for intron in hit_introns)
+                    if is_canonical_splicing:
+                        final_annotation = "Canonical_Splicing"
+        elif svtype == 'INS':
+            if len(touched_genes) > 1:
+                final_annotation = "Insertion_in_Fusion_Region"
+            elif len(touched_genes) == 1:
+                final_annotation = "Intragenic_Insertion"
 
         # 4. Format results for VCF output
         region_field = ",".join(sorted(list(touched_genes))) if touched_genes else "na"
@@ -108,14 +107,11 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
         tx_biotype_field = ",".join(sorted(list(all_tx_biotypes))) or "na"
 
         results.append((
-            chrom, start, end,
+            chrom, start, end, svtype,
             final_annotation,
-            support,
-            median_svlen,
-            region_field,
-            tx_alias_field,
-            gene_biotype_field,
-            tx_biotype_field
+            support, median_svlen,
+            region_field, tx_alias_field,
+            gene_biotype_field, tx_biotype_field
         ))
             
     return results
@@ -133,6 +129,7 @@ def write_to_vcf(annotated_df, outpath):
         "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the variant described in this record\">",
         "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Difference in length between REF and ALT alleles\">",
         "##INFO=<ID=SUPPORT,Number=1,Type=Integer,Description=\"Support count for this SV\">",
+        "##INFO=<ID=ANN_TYPE,Number=1,Type=String,Description=\"Functional annotation of the SV (e.g., Gene_Fusion, Exonic_Deletion)\">",
         "##INFO=<ID=REGION,Number=1,Type=String,Description=\"Gene region\">",
         "##INFO=<ID=TX_NAME,Number=1,Type=String,Description=\"Transcript name\">",
         "##INFO=<ID=GENE_BIOTYPE,Number=1,Type=String,Description=\"Gene biotype\">",
@@ -145,9 +142,9 @@ def write_to_vcf(annotated_df, outpath):
         vcf_out.write("\n")
 
     for _, row in annotated_df.iterrows():
-        chrom, start, stop, svtype, support, svlen, region, tx_alias, biotype_gene, biotype_tx = row
+        chrom, start, stop, svtype, ann_type, support, svlen, region, tx_alias, biotype_gene, biotype_tx = row
 
-        record = f"{chrom}\t{start}\t.\tN\t<{svtype.upper()}>\t.\tPASS\tEND={stop};SVTYPE={svtype};SVLEN={svlen};SUPPORT={support};REGION={region}"
+        record = f"{chrom}\t{start}\t.\tN\t<{svtype.upper()}>\t.\tPASS\tEND={stop};SVTYPE={svtype};SVLEN={svlen};SUPPORT={support};ANN_TYPE={ann_type};REGION={region}"
         
         if tx_alias != "na":
             record += fr";TX_NAME={tx_alias}"
@@ -175,7 +172,7 @@ def main():
     annotated = annotate_candidates(candidates, tx_tree)
 
     ## Write to VCF
-    out = pd.DataFrame(annotated, columns=["chr", "start", "stop", "SVTYPE", "SUPPORT", "SVLEN", "REGION", "TX_ALIAS", "BIOTYPE_GENE", "BIOTYPE_TX"])
+    out = pd.DataFrame(annotated, columns=["chr", "start", "stop", "SVTYPE", "ANN_TYPE", "SUPPORT", "SVLEN", "REGION", "TX_ALIAS", "BIOTYPE_GENE", "BIOTYPE_TX"])
     outpath = os.path.join(args.outdir, "GIAB002_chr22_region_LongReadSV.annotated.vcf")
     write_to_vcf(out, outpath)
     print(f"Result VCF written to {outpath}")
