@@ -4,6 +4,7 @@ A pipeline for detecting structural variants from RNA-Seq Data
 <img width="250" height="250" alt="image" src="https://github.com/user-attachments/assets/0a7a755e-688c-418d-8018-4077c9115364" />
 
 ## Team
+## Team
 - [Fritz Sedlazeck](https://github.com/fritzsedlazeck)
 - [Rupesh Kesharwani](https://github.com/unique379r)
 - [Van Truong](https://github.com/van-truong)
@@ -18,8 +19,9 @@ A pipeline for detecting structural variants from RNA-Seq Data
 - [Siyu Wang]
 - [Farhang Jaryani]
 - [Kirtan Dave]
-- [Christopher M. Grochowski] (https://github.com/cgrochowski)
+- [Christopher M. Grochowski](https://github.com/cgrochowski)
 - [Yousuf Bahit]
+
 
 ## Overview
 
@@ -33,21 +35,16 @@ RNA structural variants are any transcript-level rearrangements observed in RNA-
 
 ### 🚀 **Getting Started**
 
-*(This section will be updated soon)*
+IsoSV is implemented as a three-stage workflow:
 
-1.  **Clone the repository:**
-   
-    ```bash
-    git clone https://github.com/collaborativebioinformatics/IsoSV.git
-    
-    ```
-3.  **Set up the environment:**
-    ```bash
-    # Command to be added
-    ```
-4.  **Run the pipeline:**
-    ```bash
-    # Command to be added
+Step 1: IsoParser: Identifies candidate events by scanning BAM alignments for signatures of SVs encoded in CIGAR strings and supplementary alignment tags. It flags long insertions, deletions, skipped regions, and soft clips while recording read-level support.
+(https://github.com/collaborativebioinformatics/IsoSV/blob/main/step_a_IsoParser/README.md)
+
+
+
+
+
+
     ```
 
 ## Workflow
