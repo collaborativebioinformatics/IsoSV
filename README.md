@@ -16,7 +16,7 @@ A pipeline for detecting structural variants from RNA-Seq Data
 - [Bharati Jadhav](https://github.com/bharatij)
 - [Saolendra](https://github.com/sailepradh)
 - [Siyu Wang]
-- [Farhang Jaryani]
+- [Farhang Jaryani](https://github.com/farhangus)
 - [Kirtan Dave]
 - [Christopher M. Grochowski](https://github.com/cgrochowski)
 - [Yousuf Bahit]
