@@ -1,8 +1,26 @@
+"""
+IsoSV Integrated Pipeline
+
+This script serves as the main entry point for the integrated IsoSV pipeline.
+It combines three major steps into a single, streamlined workflow:
+1.  **Parsing**: Reads a BAM/CRAM file to identify structural variant (SV)
+    candidates, such as large indels, soft clips, and split reads.
+2.  **Clustering**: Groups the identified SV candidates based on genomic
+    proximity and type to form consolidated SV clusters.
+3.  **Annotation**: Annotates the SV clusters against a gene reference
+    (from a pickled IntervalTree) to provide functional context, such as
+    identifying gene fusions or exonic deletions, and outputs a VCF file.
+
+The pipeline is designed to be run from the command line and accepts various
+arguments to customize the behavior of each step.
+"""
 import argparse
 import sys
 import pysam
 import csv
-from _utils import (
+# import all the functions from _utils.py, 
+#   which contains the helper functions and dataclasses for parsing, clustering, and annotation
+from _utils import (  
     IndelObs, ClipObs, SplitObs, GeneAnnot,
     walk_cigar_indels_and_clips, parse_sa_tag, ref_span_from_cigar,
     cluster_indels, cluster_clips, cluster_splits, load_tx_tree, annotate_candidates, write_to_vcf

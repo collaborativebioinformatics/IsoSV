@@ -1,3 +1,17 @@
+"""
+Utility functions and data structures for the IsoSV integrated pipeline.
+
+This module contains the core logic and helper functions used by the main
+pipeline script (`run_pipeline.py`). It includes:
+- Data classes for representing different types of SV observations (Indels,
+  Clips, Splits).
+- Functions for parsing pysam alignment records to extract SV candidates from
+  CIGAR strings and SA tags.
+- Clustering algorithms to group raw SV observations into meaningful events.
+- Annotation logic to intersect SVs with gene models and produce functional
+  classifications.
+- VCF writing utilities to format the final output.
+"""
 import argparse
 import csv
 import statistics
@@ -12,8 +26,10 @@ import pandas as pd
 # pysam CIGAR operator codes
 M, I, D, N, S, H, P, EQ, X, B = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
+# define dataclasses for the three types of observations
 @dataclass
 class IndelObs:
+    """Represents an InDel observation from a single read."""
     chrom: str
     pos: int
     svtype: str
@@ -24,6 +40,7 @@ class IndelObs:
 
 @dataclass
 class ClipObs:
+    """Represents a soft/hard clip observation from a single read."""
     chrom: str
     pos: int
     side: str
@@ -33,6 +50,7 @@ class ClipObs:
 
 @dataclass
 class SplitObs:
+    """Represents a split-read observation from an SA tag."""
     chrom1: str
     pos1: int
     chrom2: str
@@ -42,7 +60,9 @@ class SplitObs:
     same_chrom: bool
     note: str = ""
 
+# define a class for gene annotation, similar to the one in step_a_IsoParser/scripts/lr_isoSV_parser.py
 class GeneAnnot:
+    """Handles loading and querying a gene annotation BED file."""
     def __init__(self):
         self.idx = IntervalIndex()
 
@@ -51,8 +71,7 @@ class GeneAnnot:
             for line in f:
                 if not line.strip() or line.startswith("#"):
                     continue
-                p = line.rstrip("
-").split("	")
+                p = line.rstrip("").split("	")
                 if len(p) < 3:
                     continue
                 chrom, s1, e1 = p[0], int(p[1]) + 1, int(p[2])
@@ -65,6 +84,17 @@ class GeneAnnot:
         return sorted({nm for _, _, nm in arr if nm}) if hit else []
 
 def is_poly_at(seq: str, min_len: int = 20, frac: float = 0.8) -> bool:
+    """
+    Checks if a sequence is likely a poly-A or poly-T tail.
+
+    Args:
+        seq: The sequence to check.
+        min_len: The minimum length for the check to apply.
+        frac: The minimum fraction of A's or T's to be considered poly-A/T.
+
+    Returns:
+        True if the sequence is likely a poly-A/T tail, False otherwise.
+    """
     if not seq or len(seq) < min_len:
         return False
     u = seq.upper()
@@ -72,6 +102,7 @@ def is_poly_at(seq: str, min_len: int = 20, frac: float = 0.8) -> bool:
     return (a / len(u) >= frac) or (t / len(u) >= frac)
 
 def ref_span_from_cigar(cigar_tuples) -> int:
+    """Calculates the span of a CIGAR string on the reference genome."""
     span = 0
     for op, length in cigar_tuples or []:
         if op in (M, EQ, X, D, N):
@@ -79,11 +110,31 @@ def ref_span_from_cigar(cigar_tuples) -> int:
     return span
 
 def walk_cigar_indels_and_clips(aln, min_ins, min_del, min_clip):
+    """
+    Scans a read's CIGAR string to identify and yield SV candidates.
+
+    Yields:
+        IndelObs or ClipObs for each candidate found.
+    """
+    chrom = aln.reference_name
+    mapq = aln.mapping_quality
+    rname = aln.query_name
+    lenn = aln.query_length
+    clipseq = aln.query_sequence
+
     if not is_poly_at(clipseq):
         yield ClipObs(chrom, aln.reference_end, 'R', lenn, mapq, rname)
 
 def parse_sa_tag(sa: str):
+    """
+    Parses the SA tag (supplementary alignment) from a BAM record.
+    
+    Returns:
+        A list of dictionaries, where each dictionary represents a supplementary alignment.
+    """
     segs = []
+    if not sa:
+        return segs
     for seg in sa.split(","):
         if ";" in seg:
             seg, qual = seg.split(";")
@@ -115,6 +166,12 @@ def length_similar(a, b, abs_slop=5, frac=0.10):
     return abs(a - b) <= max(abs_slop, int(frac * max(a, b)))
 
 def cluster_indels(obs_list, bpw, gene_annot=None, max_readnames=3):
+    """
+    Clusters Indel observations based on position and length.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a cluster.
+    """
     clusters = []
     by_chr_type = defaultdict(list)
     for o in obs_list:
@@ -148,6 +205,12 @@ def cluster_indels(obs_list, bpw, gene_annot=None, max_readnames=3):
     return clusters
 
 def cluster_clips(obs_list, bpw, gene_annot=None, max_readnames=3):
+    """
+    Clusters soft/hard clip observations based on position.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a cluster.
+    """
     clusters = []
     by_chr_side = defaultdict(list)
     for o in obs_list:
@@ -180,6 +243,12 @@ def cluster_clips(obs_list, bpw, gene_annot=None, max_readnames=3):
             })
     return clusters
 def cluster_splits(obs_list, bpw, gene_annot=None, max_readnames=3):
+    """
+    Clusters split-read observations for inter-chromosomal events.
+
+    Returns:
+        A list of dictionaries, where each dictionary represents a cluster.
+    """
     clusters = []
     by_pair = defaultdict(list)
     for o in obs_list:
@@ -217,7 +286,15 @@ def cluster_splits(obs_list, bpw, gene_annot=None, max_readnames=3):
     return clusters
 
 def load_tx_tree(filepath):
-    """Load the IntervalTree from disk"""
+    """
+    Load a pickled IntervalTree from disk.
+
+    Args:
+        filepath: Path to the .pkl file containing the IntervalTree.
+
+    Returns:
+        The loaded IntervalTree object.
+    """
     import pickle
     if not os.path.exists(filepath):
         raise FileNotFoundError("Transcript tree not found! ")
@@ -225,6 +302,16 @@ def load_tx_tree(filepath):
         return pickle.load(f)
 
 def annotate_candidates(candidates: pd.DataFrame, tx_tree):
+    """
+    Annotates SV candidates based on their overlap with gene features.
+
+    Args:
+        candidates: A DataFrame of clustered SVs.
+        tx_tree: A loaded IntervalTree containing gene and transcript information.
+
+    Returns:
+        A list of tuples, with each tuple containing the annotated fields for a VCF.
+    """
     results = []
     for _, row in candidates.iterrows():
         chrom = row['chrom']
@@ -294,6 +381,13 @@ def annotate_candidates(candidates: pd.DataFrame, tx_tree):
     return results
 
 def write_to_vcf(annotated_df, outpath):
+    """
+    Writes annotated SVs to a VCF file.
+
+    Args:
+        annotated_df: A DataFrame containing the annotated SVs.
+        outpath: The path for the output VCF file.
+    """
     with open(outpath, "w") as vcf_out:
         header_lines = [
             "##fileformat=VCFv4.2", "##source=IsoSV", "##FILTER=<ID=PASS,Description=\"All filters passed\">",
@@ -308,9 +402,7 @@ def write_to_vcf(annotated_df, outpath):
             "##INFO=<ID=TX_BIOTYPE,Number=1,Type=String,Description=\"Transcript biotype\">",
             "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO"
         ]
-        vcf_out.write("
-".join(header_lines) + "
-")
+        vcf_out.write("".join(header_lines) + "\n")
 
         for _, row in annotated_df.iterrows():
             chrom, start, stop, svtype, ann_type, support, svlen, region, tx_alias, biotype_gene, biotype_tx = row
@@ -318,8 +410,7 @@ def write_to_vcf(annotated_df, outpath):
             if tx_alias != "na": record += f";TX_NAME={tx_alias}"
             if biotype_gene != "na": record += f";GENE_BIOTYPE={biotype_gene}"
             if biotype_tx != "na": record += f";TX_BIOTYPE={biotype_tx}"
-            vcf_out.write(record + "
-")
+            vcf_out.write(record + "\n")
 
 class IntervalIndex:
     def __init__(self):
