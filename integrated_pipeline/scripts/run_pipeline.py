@@ -26,6 +26,7 @@ from _utils import (
     cluster_indels, cluster_clips, cluster_splits, load_tx_tree, annotate_candidates, write_to_vcf
 )
 import pandas as pd
+from dataclasses import asdict
 
 def main():
     ap = argparse.ArgumentParser(description="Integrated pipeline for SV detection, clustering, and annotation.")
@@ -40,6 +41,7 @@ def main():
     ap.add_argument("--gene-bed", help="BED with gene intervals to annotate outputs")
     ap.add_argument("--annotation-cache", help="Path to the transcript tree cache file for annotation")
     ap.add_argument("--max-readnames", type=int, default=3, help="Max example read names per cluster")
+    ap.add_argument("--save-parser-output", action="store_true", help="Save the raw, unclustered output of the parsing stage for debugging.")
     
     args = ap.parse_args()
 
@@ -74,6 +76,24 @@ def main():
             except Exception:
                 pass # Ignore SA parsing errors
     samfile.close()
+
+    if args.save_parser_output:
+        print("[INFO] Saving raw parser output...")
+        if indel_obs:
+            with open(f"{args.out_prefix}.raw_indels.tsv", "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=asdict(indel_obs[0]).keys(), delimiter='	')
+                writer.writeheader()
+                writer.writerows(asdict(obs) for obs in indel_obs)
+        if clip_obs:
+            with open(f"{args.out_prefix}.raw_clips.tsv", "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=asdict(clip_obs[0]).keys(), delimiter='	')
+                writer.writeheader()
+                writer.writerows(asdict(obs) for obs in clip_obs)
+        if split_obs:
+            with open(f"{args.out_prefix}.raw_splits.tsv", "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=asdict(split_obs[0]).keys(), delimiter='	')
+                writer.writeheader()
+                writer.writerows(asdict(obs) for obs in split_obs)
 
     gene_annot = None
     if args.gene_bed:
