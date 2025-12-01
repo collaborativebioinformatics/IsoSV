@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 IsoSV Integrated Pipeline
 
@@ -14,36 +16,58 @@ It combines three major steps into a single, streamlined workflow:
 The pipeline is designed to be run from the command line and accepts various
 arguments to customize the behavior of each step.
 """
+
 import argparse
-import sys
 import pysam
 import csv
-# import all the functions from _utils.py, 
-#   which contains the helper functions and dataclasses for parsing, clustering, and annotation
-from _utils import (  
-    IndelObs, ClipObs, SplitObs, GeneAnnot,
-    walk_cigar_indels_and_clips, parse_sa_tag, ref_span_from_cigar,
-    cluster_indels, cluster_clips, cluster_splits, load_tx_tree, annotate_candidates, write_to_vcf
-)
-import pandas as pd
+import logging
+
 from dataclasses import asdict
 
+from bam_parser import walk_cigar_indels_and_clips, parse_sa_tag
+from clustering import cluster_indels, cluster_clips, cluster_splits
+from annotator import annotate_candidate
+from variant_objects import IndelObs, ClipObs, SplitObs
+from trees import build_tx_trees
+from utils import write_to_vcf
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Integrated pipeline for SV detection, clustering, and annotation.")
-    ap.add_argument("in_bam", help="Input BAM/CRAM")
-    ap.add_argument("-o", "--out-prefix", required=True, help="Output prefix for TSVs")
-    ap.add_argument("--reference", help="Reference FASTA (required for CRAM)")
-    ap.add_argument("--min-mapq", type=int, default=20)
-    ap.add_argument("--min-ins", type=int, default=20, help="Minimum insertion length to report")
-    ap.add_argument("--min-del", type=int, default=20, help="Minimum deletion length to report")
-    ap.add_argument("--min-clip", type=int, default=25, help="Minimum soft/hard clip length to report")
-    ap.add_argument("--bp-window", type=int, default=10, help="Breakpoint clustering window (bp)")
-    ap.add_argument("--gene-bed", help="BED with gene intervals to annotate outputs")
-    ap.add_argument("--annotation-cache", help="Path to the transcript tree cache file for annotation")
-    ap.add_argument("--max-readnames", type=int, default=3, help="Max example read names per cluster")
-    ap.add_argument("--save-parser-output", action="store_true", help="Save the raw, unclustered output of the parsing stage for debugging.")
-    
+    ap = argparse.ArgumentParser(description="Integrated pipeline for RNA-seq based SV detection, clustering, and annotation.")
+
+    # Positional arguments
+    positional = ap.add_argument_group("Positional arguments")
+    positional.add_argument("in_bam", help="Input BAM/CRAM")
+
+    # Required arguments
+    required = ap.add_argument_group("Required arguments")
+    required.add_argument("-o", "--out-prefix", required=True, help="Output prefix for TSVs")
+    required.add_argument("--gtf", required=True, help="Path to plain GTF file for building gene annotation BED and cache")
+    required.add_argument("--reference", help="Reference FASTA (required for CRAM)")
+
+    # Optional arguments (general options)
+    options = ap.add_argument_group("Options")
+    options.add_argument("--min-mapq", type=int, default=20)
+    options.add_argument("--min-ins", type=int, default=20, help="Minimum insertion length to report")
+    options.add_argument("--min-del", type=int, default=20, help="Minimum deletion length to report")
+    options.add_argument("--min-clip", type=int, default=25, help="Minimum soft/hard clip length to report")
+    options.add_argument("--bp-window", type=int, default=10, help="Breakpoint clustering window (bp)")
+
+    # Debugging / developer options
+    debug = ap.add_argument_group("Debugging options")
+    debug.add_argument("--save-parser-output", action="store_true", help="Save the raw, unclustered output of the parsing stage for debugging.")
+    debug.add_argument("--max-readnames", type=int, default=3, help="Max example read names per cluster")
+
     args = ap.parse_args()
+
+    # Step 0: Build trees
+    tx_trees = build_tx_trees(args.gtf)
 
     # Step 1: Parsing
     samfile = pysam.AlignmentFile(args.in_bam, "rb")
@@ -74,6 +98,7 @@ def main():
                         same_chrom=(aln.reference_name == rname2)
                     ))
             except Exception:
+                print("[WARNING] Error parsing SA tag for read:", aln.query_name)
                 pass # Ignore SA parsing errors
     samfile.close()
 
@@ -95,37 +120,12 @@ def main():
                 writer.writeheader()
                 writer.writerows(asdict(obs) for obs in split_obs)
 
-    gene_annot = None
-    if args.gene_bed:
-        gene_annot = GeneAnnot()
-        gene_annot.load_bed(args.gene_bed)
+    # Step 2: Clustering candidate by candidate
+    indel_clusters = cluster_indels(indel_obs, args.bp_window, trees=tx_trees, max_readnames=args.max_readnames)
+    clip_clusters = cluster_clips(clip_obs, args.bp_window, trees=tx_trees, max_readnames=args.max_readnames)
+    split_clusters = cluster_splits(split_obs, args.bp_window, trees=tx_trees, max_readnames=args.max_readnames)
 
-    # Step 2: Clustering
-    indel_clusters = cluster_indels(indel_obs, args.bp_window, gene_annot=gene_annot, max_readnames=args.max_readnames)
-    clip_clusters = cluster_clips(clip_obs, args.bp_window, gene_annot=gene_annot, max_readnames=args.max_readnames)
-    split_clusters = cluster_splits(split_obs, args.bp_window, gene_annot=gene_annot, max_readnames=args.max_readnames)
-
-    # Step 3: Annotation
-    if args.annotation_cache:
-        tx_tree = load_tx_tree(args.annotation_cache)
-        
-        # Convert clusters to DataFrames for annotation
-        indel_df = pd.DataFrame(indel_clusters)
-        
-        # Ensure correct columns for annotation function
-        if not indel_df.empty:
-            indel_df["support"] = indel_df["support"].astype(int)
-            indel_df = indel_df.rename(columns={"pos": "start", "svtype": "type", "length": "median_sv_len"})
-            indel_df["end"] = indel_df.apply(lambda row: row["start"] + row["median_sv_len"] - 1 if row["type"] == "DEL" else row["start"], axis=1)
-            
-            annotated_indels = annotate_candidates(indel_df, tx_tree)
-            annotated_df = pd.DataFrame(annotated_indels, columns=["chr", "start", "stop", "SVTYPE", "ANN_TYPE", "SUPPORT", "SVLEN", "REGION", "TX_ALIAS", "BIOTYPE_GENE", "BIOTYPE_TX"])
-            
-            vcf_outpath = f"{args.out_prefix}.annotated.vcf"
-            write_to_vcf(annotated_df, vcf_outpath)
-            print(f"Annotated VCF written to {vcf_outpath}")
-
-    # Step 3: Annotation and Output
+    # Additional TSV Output?
     with open(f"{args.out_prefix}.indels.tsv", "w", newline="") as f:
         w = csv.writer(f, delimiter="	")
         w.writerow(["chrom","pos","end","svtype","length","support","median_mapq","example_reads","example_ins_seq","genes"])
@@ -145,10 +145,25 @@ def main():
         for c in sorted(split_clusters, key=lambda x: (x["chrom1"], x["pos1"], x["chrom2"], x["pos2"])):
             w.writerow([c["chrom1"], c["pos1"], c["chrom2"], c["pos2"], c["support"], c["median_mapq"], c["notes"], c["example_reads"], c["genes_left"], c["genes_right"]])
             
-    print(f"Found {len(indel_clusters)} indel clusters.")
-    print(f"Found {len(clip_clusters)} clip clusters.")
-    print(f"Found {len(split_clusters)} split clusters.")
-    print("Pipeline finished.")
+    # Step 3: Annotation and VCF output
+    annotated_candidates = []
+    for indel in indel_clusters:
+        indel["length"] = int(indel["length"])
+        indel["support"] = int(indel["support"])
+        indel["end"] = indel["pos"] + indel["length"] - 1 if indel["svtype"] == "DEL" else indel["pos"]
+        annotated_candidate = annotate_candidate(indel, tx_trees)
+
+        if annotated_candidate is None:
+            raise ValueError("Annotation failed for candidate:", indel, "Something is wrong with the gene annotation tree.")
+        annotated_candidates.append(annotated_candidate)
+
+    write_to_vcf(annotated_candidates, f"{args.out_prefix}.annotated.vcf")
+    logger.info(f"Annotated VCF written to {args.out_prefix}.annotated.vcf")
+
+    logger.info(f"Found {len(indel_clusters)} indel clusters.")
+    logger.info(f"Found {len(clip_clusters)} clip clusters.")
+    logger.info(f"Found {len(split_clusters)} split clusters.")
+    logger.info("Pipeline finished.")
 
 if __name__ == "__main__":
     main()
