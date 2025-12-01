@@ -4,6 +4,13 @@ from utils import is_poly_at
 # pysam CIGAR operator codes
 M, I, D, N, S, H, P, EQ, X, B = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
+def ref_span_from_cigar(cigar_tuples) -> int:
+    """Calculates the span of a CIGAR string on the reference genome."""
+    span = 0
+    for op, length in cigar_tuples or []:
+        if op in (M, EQ, X, D, N):
+            span += length
+    return span
 
 def walk_cigar_indels_and_clips(aln, min_ins, min_del, min_clip):
     chrom = aln.reference_name

@@ -1,7 +1,3 @@
-
-# pysam CIGAR operator codes
-M, I, D, N, S, H, P, EQ, X, B = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-
 def within(a, b, w):
     return abs(a - b) <= w
 
@@ -25,14 +21,6 @@ def is_poly_at(seq: str, min_len: int = 20, frac: float = 0.8) -> bool:
     u = seq.upper()
     a = u.count("A"); t = u.count("T")
     return (a / len(u) >= frac) or (t / len(u) >= frac)
-
-def ref_span_from_cigar(cigar_tuples) -> int:
-    """Calculates the span of a CIGAR string on the reference genome."""
-    span = 0
-    for op, length in cigar_tuples or []:
-        if op in (M, EQ, X, D, N):
-            span += length
-    return span
 
 def write_to_vcf(annotated_candidates, outpath):
     """

@@ -89,7 +89,12 @@ class GTFParser:
         Yields (feature_type, record) tuples.
         """
         try:
-            with open(self.gtf_file, 'r') as f:
+            if self.gtf_file.endswith('.gz'):
+                import gzip
+                f = gzip.open(self.gtf_file, 'rt')
+            else:
+                f = open(self.gtf_file, 'r')
+            with f:
                 for line in f:
                     # Skip header and comment lines
                     if line.startswith('#'):
