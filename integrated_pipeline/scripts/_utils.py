@@ -111,50 +111,114 @@ def ref_span_from_cigar(cigar_tuples) -> int:
 
 def walk_cigar_indels_and_clips(aln, min_ins, min_del, min_clip):
     """
-    Scans a read's CIGAR string to identify and yield SV candidates.
+    Scan a read's CIGAR to yield Indel and Clip observations.
 
-    Yields:
-        IndelObs or ClipObs for each candidate found.
+    This is adapted from the long-read parser in `step_a_IsoParser` so that
+    the integrated pipeline sees the same indel / soft-clip events.
     """
     chrom = aln.reference_name
     mapq = aln.mapping_quality
     rname = aln.query_name
-    lenn = aln.query_length
-    clipseq = aln.query_sequence
+    try:
+        read_seq = aln.query_sequence
+    except Exception:
+        read_seq = None
 
-    if not is_poly_at(clipseq):
-        yield ClipObs(chrom, aln.reference_end, 'R', lenn, mapq, rname)
+    cigar = aln.cigartuples or []
+    ref_pos = aln.reference_start  # 0-based
+    read_pos = 0
+
+    # Left clip
+    if cigar:
+        op0, len0 = cigar[0]
+        if op0 in (S, H) and len0 >= min_clip:
+            clipseq = (read_seq[:len0] if (op0 == S and read_seq is not None) else "")
+            if not is_poly_at(clipseq):
+                # report the left breakpoint as 1-based start
+                yield ClipObs(chrom, aln.reference_start + 1, 'L', len0, mapq, rname)
+
+    for op, length in cigar:
+        if op in (M, EQ, X):
+            ref_pos += length
+            read_pos += length
+        elif op == I:
+            # insertion relative to reference at ref_pos
+            ins_seq = None
+            if length >= min_ins and read_seq is not None:
+                ins_seq = read_seq[read_pos: read_pos + length]
+            if length >= min_ins:
+                yield IndelObs(chrom, ref_pos + 1, "INS", length, mapq, rname, ins_seq)
+            read_pos += length
+        elif op == D:
+            # deletion relative to reference starting at ref_pos
+            if length >= min_del:
+                yield IndelObs(chrom, ref_pos + 1, "DEL", length, mapq, rname, None)
+            ref_pos += length
+        elif op == N:
+            # skipped region (intron)
+            ref_pos += length
+        elif op == S:
+            # soft clip inside the read (already handled at ends)
+            read_pos += length
+        elif op in (H, P, B):
+            # hard clip / padding / back
+            pass
+
+    # Right clip
+    if cigar:
+        opn, lenn = cigar[-1]
+        if opn in (S, H) and lenn >= min_clip:
+            clipseq = (read_seq[-lenn:] if (opn == S and read_seq is not None) else "")
+            if not is_poly_at(clipseq):
+                # report the right breakpoint as reference_end (1-based)
+                yield ClipObs(chrom, aln.reference_end, 'R', lenn, mapq, rname)
 
 def parse_sa_tag(sa: str):
     """
-    Parses the SA tag (supplementary alignment) from a BAM record.
-    
-    Returns:
-        A list of dictionaries, where each dictionary represents a supplementary alignment.
+    Parse the SA tag into a list of dicts.
+
+    Matches the format used in `lr_isoSV_parser.py` / `sr_isoSV_parser.py` so
+    that downstream split-read handling can treat entries uniformly.
     """
     segs = []
     if not sa:
         return segs
-    for seg in sa.split(","):
-        if ";" in seg:
-            seg, qual = seg.split(";")
-            segs.append((seg, qual))
-        else:
-            segs.append((seg, ""))
+    entries = [e for e in sa.strip().split(";") if e]
+    for e in entries:
+        try:
+            rname, pos, strand, cig, mapq, nm = e.split(",")
+        except ValueError:
+            # malformed SA entry – skip
+            continue
+        segs.append({
+            "rname": rname,
+            "pos": int(pos),
+            "strand": strand,
+            "cigar": cig,
+            "mapq": int(mapq),
+            "nm": int(nm),
+        })
     return segs
 
+
 def cigarstr_to_tuples(cigar_str: str):
+    """
+    Convert a CIGAR string from an SA tag into (op, length) tuples
+    using the same numeric op codes as pysam.
+    """
     out = []
     num = ""
-    for c in cigar_str:
-        if c.isdigit():
-            num += c
-        else:
-            if num:
-                out.append((int(num), c))
-                num = ""
-            else:
-                out.append((1, c))
+    opmap = {'M': M, 'I': I, 'D': D, 'N': N, 'S': S, 'H': H, 'P': P, '=': EQ, 'X': X}
+    for ch in cigar_str:
+        if ch.isdigit():
+            num += ch
+            continue
+        if ch not in opmap:
+            raise ValueError(f"Unknown CIGAR op in SA: {ch}")
+        if not num:
+            raise ValueError("Missing length before CIGAR op in SA")
+        out.append((opmap[ch], int(num)))
+        num = ""
     if num:
         raise ValueError("Trailing digits in CIGAR string")
     return out
